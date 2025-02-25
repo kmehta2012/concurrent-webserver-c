@@ -17,26 +17,26 @@ int open_clientfd(char *hostname, char *port) {
 
     int success_code = getaddrinfo(hostname, port, &hints, &results);
     if (!success_code){
-        fprintf("Unable to connect to server: %s", gai_strerror(success_code));
+        fprintf(stderr, "Unable to connect to server: %s", gai_strerror(success_code));
         return -1;
     }
     
-    addrinfo * curr_socket_cadidate = results;
+    addrinfo * curr_socket_candidate = results;
     int candidate_counter = 0;
     int client_fd  = -1;
     
-    for(; curr_socket_cadidate; curr_socket_cadidate = curr_socket_cadidate->ai_next) {
+    for(; curr_socket_candidate; curr_socket_candidate = curr_socket_candidate->ai_next) {
         candidate_counter += 1;
-        int clientfd = socket(curr_socket_cadidate->ai_family, curr_socket_cadidate->ai_socktype, curr_socket_cadidate->ai_protocol);
+        client_fd = socket(curr_socket_candidate->ai_family, curr_socket_candidate->ai_socktype, curr_socket_candidate->ai_protocol);
         
-        if (clientfd == -1) {
+        if (client_fd == -1) {
             fprintf(stderr, "Failed to open socket %d: %s\n", candidate_counter, strerror(errno));
             continue;
         }
 
-        if (connect(clientfd, curr_socket_cadidate->ai_addr, curr_socket_cadidate->ai_addrlen)) {
+        if (connect(client_fd, curr_socket_candidate->ai_addr, curr_socket_candidate->ai_addrlen)) {
             fprintf(stderr, "Client socket candidate %d failed to connect: %s\n", candidate_counter, strerror(errno));
-            close(clientfd);
+            close(client_fd);
             continue;
         }
         break;
@@ -56,7 +56,45 @@ int open_listenfd(char * port) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_ADDRCONFIG | AI_NUMERICSERV | AI_PASSIVE;
 
-    
+    int success_code = getaddrinfo(NULL, port, &hints, &results);
+    if(!success_code){
+        fprintf(stderr, "Unable to connect to server : %s", gai_strerror(success_code));
+    }
 
-    return 0;
+    addrinfo * curr_socket_candidate = results;
+    int candidate_counter = 0;
+    int server_fd  = -1;
+
+    for(; curr_socket_candidate; curr_socket_candidate = curr_socket_candidate->ai_next) {
+        candidate_counter += 1;
+        server_fd = socket(curr_socket_candidate->ai_family, curr_socket_candidate->ai_socktype, curr_socket_candidate->ai_protocol);
+        
+        if (server_fd == -1) {
+            fprintf(stderr, "Failed to open socket %d: %s\n", candidate_counter, strerror(errno));
+            continue;
+        }
+
+        if (bind(server_fd, curr_socket_candidate->ai_addr, curr_socket_candidate->ai_addrlen)) {
+            fprintf(stderr, "Server socket candidate %d failed to connect: %s\n", candidate_counter, strerror(errno));
+            close(server_fd);
+            server_fd = -1;
+
+            continue;
+        }
+
+        if(listen(server_fd, BACKLOG)){
+            fprintf(stderr, "Server socket candidate %d failed to convert to listening socket: %s\n", candidate_counter, strerror(errno));
+            close(server_fd);
+            server_fd = -1;
+            continue;
+        }
+        break;
+    }
+
+    if(server_fd == -1) {
+        fprintf(stderr, "Unable to open listening socket : All candidate sockets failed");
+    }
+
+    freeaddrinfo(results);
+    return server_fd;
 }

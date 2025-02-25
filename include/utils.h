@@ -4,6 +4,8 @@
 #include <netinet/in.h>
 #include <netdb.h>
 
+#define BACKLOG 1024
+
 enum process_type {
     CLIENT,
     SERVER
