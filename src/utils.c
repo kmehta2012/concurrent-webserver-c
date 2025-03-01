@@ -1,4 +1,4 @@
-#include "../include/utils.h"
+#include "../include/net.h"
 #include <sys/socket.h>
 #include <netdb.h>
 #include <string.h>
@@ -73,7 +73,14 @@ int open_listenfd(char * port) {
             fprintf(stderr, "Failed to open socket %d: %s\n", candidate_counter, strerror(errno));
             continue;
         }
-
+        
+        int optval = 1;
+        if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) < 0) {
+            fprintf(stderr, "Failed to set socket options: %s\n", strerror(errno));
+            close(server_fd);
+            server_fd = -1;
+            continue;
+        }
         if (bind(server_fd, curr_socket_candidate->ai_addr, curr_socket_candidate->ai_addrlen)) {
             fprintf(stderr, "Server socket candidate %d failed to connect: %s\n", candidate_counter, strerror(errno));
             close(server_fd);
