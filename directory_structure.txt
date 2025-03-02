@@ -7,6 +7,8 @@ Concurrent-webserver-c/
 │   ├── worker.h           # Thread/process pool management
 │   ├── config.h           # Server configuration
 │   └── request_handler.h  # HTTP request handling
+│   └── rio.h              # robust I/O handling
+│   
 ├── src/
 │   ├── utils.c
 │   ├── logger.c
@@ -16,6 +18,7 @@ Concurrent-webserver-c/
 │   ├── config.c
 │   ├── request_handler.c
 │   └── server.c           # Main server entry point
+|   └── rio.c  
 ├── logs/
 │   ├── access.log         # Successful request logs
 │   ├── error.log          # Error logs
