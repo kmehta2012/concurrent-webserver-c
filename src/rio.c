@@ -7,9 +7,6 @@
 #include <string.h>
 
 ssize_t rio_unbuffered_read(int fd, void * buf, size_t read_size) {
-    /*
-    
-    */
    if(read_size > SSIZE_MAX){
         fprintf(stderr, "Cannot read more than %zd bytes at once", SSIZE_MAX);
         return -1;
@@ -22,7 +19,7 @@ ssize_t rio_unbuffered_read(int fd, void * buf, size_t read_size) {
             continue;
         }
         else if(bytes_read == -1) {
-            fprintf(stderr, "Read failed. Error : ", strerror(errno));
+            fprintf(stderr, "Read failed. Error : %s", strerror(errno));
             return -1;
         }
         else if(bytes_read == 0) {  // EOF
@@ -50,7 +47,7 @@ ssize_t rio_unbuffered_write(int fd, void * buf, size_t write_size) {
             continue;
         }
         else if(bytes_written == -1) { 
-            fprintf(stderr, "Write failed. Error : ", strerror(errno));
+            fprintf(stderr, "Write failed. Error : %s", strerror(errno));
             return -1;
         }
         else if(bytes_written == 0) { 
@@ -108,14 +105,40 @@ ssize_t rio_buffered_readline(rio_buf * buf, void * user_buf, size_t read_size) 
                 break;
             }
         }
-        *user_bufp = buf->buffer[buf->pointer];
+        char current_char = buf->buffer[buf->pointer];
+        *user_bufp = current_char;
         ++user_bufp;
         ++buf->pointer;
         total_bytes_read += 1;
 
-        if(*user_bufp == '\n'){ 
+        if(current_char == '\n'){ 
+            *user_bufp = '\0';
             break;
         }
+    }
+    return total_bytes_read;
+}
+
+ssize_t rio_buffered_readb(rio_buf * buf, void * user_buf, size_t read_size) {
+    char * user_bufp = (char *) user_buf;
+    size_t total_bytes_read = 0;
+    
+    while(total_bytes_read < read_size) {
+        if(is_buffer_empty(buf)) {
+            size_t fill_size = fill_buffer(buf);
+            if(fill_size == -1) {
+                fprintf(stderr, "fill_buffer failed to fill the buffer");
+                return -1;
+            }
+            else if(fill_size == 0) { // Reached EOF
+                break;
+            }
+        }
+        char current_char = buf->buffer[buf->pointer];
+        *user_bufp = current_char;
+        ++user_bufp;
+        ++buf->pointer;
+        total_bytes_read += 1;
     }
     return total_bytes_read;
 }
