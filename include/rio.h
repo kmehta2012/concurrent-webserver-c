@@ -70,7 +70,7 @@ Args
 Returns
     true if empty false otherwise
 */
-bool is_buffer_empty(rio_buf * buf);
+inline bool is_buffer_empty(rio_buf * buf);
 
 
 /*
@@ -87,7 +87,7 @@ ssize_t rio_buffered_readline(rio_buf * buf, void * user_buf, size_t read_size);
 buffered version of rio_buffered_read
 
 */
-ssize_t rio_buffered_read(rio_buf * buf, void * user_buf, size_t read_size);
+ssize_t rio_buffered_readb(rio_buf * buf, void * user_buf, size_t read_size);
 
 
 

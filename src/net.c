@@ -16,7 +16,7 @@ int open_clientfd(char *hostname, char *port) {
     hints.ai_flags |= AI_CANONNAME;
 
     int success_code = getaddrinfo(hostname, port, &hints, &results);
-    if (!success_code){
+    if (success_code){
         fprintf(stderr, "Unable to connect to server: %s", gai_strerror(success_code));
         return -1;
     }
@@ -57,7 +57,7 @@ int open_listenfd(char * port) {
     hints.ai_flags = AI_ADDRCONFIG | AI_NUMERICSERV | AI_PASSIVE;
 
     int success_code = getaddrinfo(NULL, port, &hints, &results);
-    if(!success_code){
+    if(success_code){
         fprintf(stderr, "Unable to connect to server : %s", gai_strerror(success_code));
     }
 
