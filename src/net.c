@@ -12,8 +12,7 @@ int open_clientfd(char *hostname, char *port) {
     addrinfo hints, *results;
     memset(&hints, 0, sizeof(addrinfo));
     hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags |= AI_ADDRCONFIG;
-    hints.ai_flags |= AI_CANONNAME;
+    hints.ai_flags = AI_ADDRCONFIG | AI_CANONNAME;
 
     int success_code = getaddrinfo(hostname, port, &hints, &results);
     if (success_code){
@@ -85,7 +84,6 @@ int open_listenfd(char * port) {
             fprintf(stderr, "Server socket candidate %d failed to connect: %s\n", candidate_counter, strerror(errno));
             close(server_fd);
             server_fd = -1;
-
             continue;
         }
 

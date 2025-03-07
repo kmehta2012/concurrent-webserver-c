@@ -24,7 +24,7 @@ Args
     char * hostname : IPV4 address or the domain name associated with the server
     char * port : port number associated with the server
 Returns
-    0 on sucess and -1 on failure
+    socket descriptor and -1 on failure
 */
 int open_clientfd(char * hostname, char * port);
 
@@ -38,6 +38,8 @@ Returns
     The descriptor of the listening socket on success. -1 on failure
 */
 int open_listenfd(char * port);
+
+int echo(int fd, char * buf);
 
 
 #endif

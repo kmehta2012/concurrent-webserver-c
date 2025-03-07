@@ -30,11 +30,11 @@ ssize_t rio_unbuffered_read(int fd, void * buf, size_t read_size);
 
 
 /*
-The rio_unbuffered_write function transfers up to write_size bytes from the current file position of descriptor fd to memory location buf
+The rio_unbuffered_write function transfers up to write_size bytes from buf to fd
 
 Args
-    int fd - file descriptor of the file we're reading from
-    void * buf - buffer in which we'll store the read data
+    int fd - file descriptor of the file we're writing to
+    void * buf - buffer whose data we're writing
     size_t write_size - max bytes to read
 Returns
     number of bytes written on success, -1 on failure
@@ -76,10 +76,10 @@ inline bool is_buffer_empty(rio_buf * buf);
 /*
 The rio_buffered_readline function fills user_buf with a null terminal string. Assumption is that we're reading from a text file to fill buf
 Args
-    rio_buf * buf - buffer in question
-    void * user_buf
+    rio_buf * buf - buffer from which we're reading
+    void * user_buf - buffer to which we're reading
 Returns
-    true if empty false otherwise
+    -1 on failure, total bytes read on success
 */
 ssize_t rio_buffered_readline(rio_buf * buf, void * user_buf, size_t read_size);
 
