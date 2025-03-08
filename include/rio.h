@@ -16,7 +16,7 @@ typedef struct{
 
 
 /*
-The rio_unbuffered_read function transfers up to read_size bytes from the current file position of descriptor fd to memory location buf
+Transfers up to read_size bytes from the current file position of descriptor fd to memory location buf
 
 Args
     int fd - file descriptor of the file we're reading from
@@ -30,7 +30,7 @@ ssize_t rio_unbuffered_read(int fd, void * buf, size_t read_size);
 
 
 /*
-The rio_unbuffered_write function transfers up to write_size bytes from buf to fd
+Transfers up to write_size bytes from buf to fd
 
 Args
     int fd - file descriptor of the file we're writing to
@@ -43,7 +43,7 @@ ssize_t rio_unbuffered_write(int fd, void * buf, size_t write_size);
 
 
 /*
-The rio_init_buffer function associates buffer buf with fd, and fills buf with upto BUFFER_SIZE bytes of data from fd
+associates buffer buf with fd, and fills buf with upto BUFFER_SIZE bytes of data from fd
 
 Args
     int fd - file descriptor of the file we're reading from
@@ -54,7 +54,7 @@ Returns
 int rio_init_buffer(int fd, rio_buf * buf);
 
 /*
-The fill_buffer function fills buffer buf with atmost BUFFER_SIZE bytes of data from buf->fd
+fills buffer buf with atmost BUFFER_SIZE bytes of data from buf->fd
 
 Args
     rio_buf * buf - buffer in which we're filling
@@ -64,7 +64,7 @@ Returns
 ssize_t fill_buffer(rio_buf * buf);
 
 /*
-The is_buffer_empty function returns true if the buffer pointer is at the last position of the buffer. 
+returns true if the buffer pointer is at the last position of the buffer. 
 Args
     rio_buf * buf - buffer in question
 Returns
@@ -74,7 +74,7 @@ inline bool is_buffer_empty(rio_buf * buf);
 
 
 /*
-The rio_buffered_readline function fills user_buf with a null terminal string. Assumption is that we're reading from a text file to fill buf
+fills user_buf with atmost read_size bytes of null terminated text data from buffer buf. Reads until read_size bytes are read or a \n is read. \n is replaced with a \0
 Args
     rio_buf * buf - buffer from which we're reading
     void * user_buf - buffer to which we're reading
@@ -85,7 +85,6 @@ ssize_t rio_buffered_readline(rio_buf * buf, void * user_buf, size_t read_size);
 
 /*
 buffered version of rio_buffered_read
-
 */
 ssize_t rio_buffered_readb(rio_buf * buf, void * user_buf, size_t read_size);
 

@@ -18,10 +18,8 @@ typedef enum process_type process_type;
 
 /*
 Establishes a TCP connection with a server running on host hostname and listening on port number
-Supports IPV4 addresses only 
-
 Args 
-    char * hostname : IPV4 address or the domain name associated with the server
+    char * hostname : IP address or the domain name associated with the server
     char * port : port number associated with the server
 Returns
     socket descriptor and -1 on failure
