@@ -10,8 +10,8 @@
 typedef struct{
     int fd;
     char buffer[BUFFER_SIZE];
-    size_t pointer;
-    size_t curr_buffer_size;
+    size_t pointer; // position of the byte starting which we'll read or write
+    size_t curr_buffer_size; 
 }rio_buf;
 
 

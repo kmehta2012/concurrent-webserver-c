@@ -4,9 +4,10 @@
 #include <sys/socket.h>
 #include <errno.h>
 #include <string.h>
+#include <unistd.h>
 
-int echo(int fd, char * buf) {
-    int echo_status = rio_unbuffered_write(fd, buf, BUFFER_SIZE);
+int echo(int fd, char * buf, ssize_t buffer_size) {
+    int echo_status = rio_unbuffered_write(fd, buf, buffer_size);
 
     if(echo_status == -1) {
         return -1;
@@ -17,6 +18,7 @@ int echo(int fd, char * buf) {
 int main(int argc, char ** argv)  {
     if(argc == 1 || argc > 2) {
         fprintf(stderr, "Please run as ./prog_name port_number");
+        return -1;
     }
     
     char * port = argv[1];
@@ -27,13 +29,15 @@ int main(int argc, char ** argv)  {
     
     for(int conn_fd = accept(listenfd, &client_addr, &addrlen); ;conn_fd = accept(listenfd, &client_addr, &addrlen)) {
         if(conn_fd == - 1) {
-            fprintf(stderr, "failed to connect to current client : %s", strerror(errno));
+            fprintf(stderr, "failed to connect to current client. Moving to next client : %s", strerror(errno));
             continue;
         }
-        while(rio_unbuffered_read(conn_fd, buf, BUFFER_SIZE) != 0) { // read from connfd
-            int echo_status = echo(conn_fd, buf); // echo the same to connfd
+        for(ssize_t total_bytes = rio_unbuffered_read(conn_fd, buf, BUFFER_SIZE); total_bytes != 0; total_bytes = rio_unbuffered_read(conn_fd, buf, BUFFER_SIZE)) { // read from connfd
+            int echo_status = echo(conn_fd, buf, total_bytes); // echo the same to connfd
             if(echo_status == -1) {
-                fprintf(stderr, "failed to echo to client");
+                fprintf(stderr, "failed to echo to client. Closing current connection and moving to the next client");
+                close(conn_fd);
+                break;
             }
         }
     }  
