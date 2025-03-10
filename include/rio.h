@@ -10,8 +10,8 @@
 typedef struct{
     int fd;
     char buffer[BUFFER_SIZE];
-    size_t pointer; // position of the byte starting which we'll read or write
-    size_t curr_buffer_size; 
+    ssize_t pointer; // position of the byte starting which we'll read or write
+    ssize_t curr_buffer_size; 
 }rio_buf;
 
 
@@ -70,7 +70,9 @@ Args
 Returns
     true if empty false otherwise
 */
-inline bool is_buffer_empty(rio_buf * buf);
+static inline bool is_buffer_empty(rio_buf * buf) {
+    return buf->pointer == buf->curr_buffer_size ? true : false;
+}
 
 
 /*

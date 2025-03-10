@@ -27,7 +27,7 @@ int main(int argc, char ** argv)  {
     socklen_t addrlen = sizeof(struct sockaddr_storage);
     char buf[BUFFER_SIZE];
     
-    for(int conn_fd = accept(listenfd, &client_addr, &addrlen); ;conn_fd = accept(listenfd, &client_addr, &addrlen)) {
+    for(int conn_fd = accept(listenfd, (sockaddr *)&client_addr, &addrlen); ;conn_fd = accept(listenfd, (sockaddr *) &client_addr, &addrlen)) {
         if(conn_fd == - 1) {
             fprintf(stderr, "failed to connect to current client. Moving to next client : %s", strerror(errno));
             continue;

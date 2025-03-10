@@ -25,7 +25,6 @@ ssize_t rio_unbuffered_read(int fd, void * buf, size_t read_size) {
         else if(bytes_read == 0) {  // EOF
             break;
         }
-        
         read_size -= bytes_read;
         total_bytes_read += bytes_read;
         bufp += bytes_read;
@@ -74,9 +73,7 @@ int rio_init_buffer(int fd, rio_buf * buf) {
     return buf->curr_buffer_size;
 }
 
-inline bool is_buffer_empty(rio_buf * buf) {
-    return buf->pointer == buf->curr_buffer_size ? true : false;
-}
+
 
 ssize_t fill_buffer(rio_buf * buf) {
     buf->curr_buffer_size = rio_unbuffered_read(buf->fd, buf->buffer, BUFFER_SIZE);
@@ -96,7 +93,7 @@ ssize_t rio_buffered_readline(rio_buf * buf, void * user_buf, size_t read_size) 
     
     while(total_bytes_read < read_size) {
         if(is_buffer_empty(buf)) {
-            size_t fill_size = fill_buffer(buf);
+            ssize_t fill_size = fill_buffer(buf);
             if(fill_size == -1) {
                 fprintf(stderr, "fill_buffer failed to fill the buffer");
                 return -1;
@@ -125,7 +122,7 @@ ssize_t rio_buffered_readb(rio_buf * buf, void * user_buf, size_t read_size) {
     
     while(total_bytes_read < read_size) {
         if(is_buffer_empty(buf)) {
-            size_t fill_size = fill_buffer(buf);
+            ssize_t fill_size = fill_buffer(buf);
             if(fill_size == -1) {
                 fprintf(stderr, "fill_buffer failed to fill the buffer");
                 return -1;
