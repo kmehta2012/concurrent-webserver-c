@@ -37,7 +37,5 @@ Returns
 */
 int open_listenfd(char * port);
 
-int echo(int fd, char * buf, ssize_t buffer_size);
-
 
 #endif
