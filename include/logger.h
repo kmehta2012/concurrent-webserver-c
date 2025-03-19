@@ -55,7 +55,7 @@ static const char* level_names[] = {
     time_t now = time(NULL); \
     char time_str[20]; \
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now)); \
-    fprintf(stderr, "[%s] [%s] " fmt "\n", time_str, level_names[level], ##__VA_ARGS__); \
+    fprintf(stderr, "[%s] [%s] [%s:%d] " fmt "\n", time_str, level_names[level], __func__, __LINE__, ##__VA_ARGS__); \
 } while(0)
 
 #define LOG_DEBUG(fmt, ...) LOG(LOG_DEBUG, fmt, ##__VA_ARGS__)
