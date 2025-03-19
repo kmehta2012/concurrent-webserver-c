@@ -24,7 +24,7 @@ int main(int argc, char ** argv)  {
     1. Client reads from stdin and writes to its socket to send the read content to the server's connected descriptor
     2. Server echoes and sends it back to the client sockets
     3. Read from the client's socket and write to stdout
-    4. Read the echo response from the server and prirnt to stdout
+    4. Read the echo response from the server and print to stdout
     */
 
     for(ssize_t total_bytes = rio_buffered_readline(&stdin_buf, user_input, BUFFER_SIZE); total_bytes != 0; total_bytes = rio_buffered_readline(&stdin_buf, user_input, BUFFER_SIZE)) {
