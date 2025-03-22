@@ -27,6 +27,8 @@ int main(int argc, char ** argv)  {
     4. Read the echo response from the server and print to stdout
     */
 
+    printf("Enter line to echo : ");
+    fflush(stdout);
     for(ssize_t total_bytes = rio_buffered_readline(&stdin_buf, user_input, BUFFER_SIZE); total_bytes != 0; total_bytes = rio_buffered_readline(&stdin_buf, user_input, BUFFER_SIZE)) {
         if(total_bytes == -1) {
             fprintf(stderr, "failed to read user input");
@@ -49,6 +51,8 @@ int main(int argc, char ** argv)  {
             fprintf(stderr, "failed to write server response to stdout");
             return -1;
         }
+        printf("Enter line to echo : ");
+        fflush(stdout);
     }
     close(clientfd);
     return 0;

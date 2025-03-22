@@ -70,32 +70,38 @@ ssize_t rio_unbuffered_write(int fd, void * buf, size_t write_size) {
     return total_bytes_written;
 }
 
-int rio_init_buffer(int fd, rio_buf * buf) {
-    LOG_DEBUG("Initializing buffer for fd %d", fd);
-    buf->curr_buffer_size = rio_unbuffered_read(fd, buf->buffer, BUFFER_SIZE);
-    
-    if(buf->curr_buffer_size == -1) {
-        LOG_ERROR("Failed to initialize buffer for fd %d", fd);
-        buf->curr_buffer_size = 0;
-        buf->pointer = buf->curr_buffer_size;
-        return -1;
-    }
+int rio_init_buffer(int fd, rio_buf *buf) {
+    LOG_DEBUG("Initializing buffer structure for fd %d without reading data", fd);
     
     buf->fd = fd;
+    buf->curr_buffer_size = 0;
     buf->pointer = 0;
-    LOG_DEBUG("Buffer initialized for fd %d with %zd bytes", fd, buf->curr_buffer_size);
-    return buf->curr_buffer_size;
+    
+    LOG_DEBUG("Buffer structure initialized for fd %d (empty, will be filled on first read)", fd);
+    return 0;
 }
 
 ssize_t fill_buffer(rio_buf * buf) {
     LOG_DEBUG("Filling buffer for fd %d", buf->fd);
-    buf->curr_buffer_size = rio_unbuffered_read(buf->fd, buf->buffer, BUFFER_SIZE);
-    if(buf->curr_buffer_size == -1) {
-        LOG_ERROR("Failed to fill buffer for fd %d", buf->fd);
-        buf->curr_buffer_size = 0;
-        buf->pointer = buf->curr_buffer_size;
-        return -1;
+    
+    ssize_t bytes_read = read(buf->fd, buf->buffer, BUFFER_SIZE);
+    
+    if(bytes_read < 0) {
+        if(errno == EINTR) {
+            LOG_DEBUG("Read interrupted by signal, retrying");
+            return fill_buffer(buf);  // Retry if interrupted by signal
+        } else {
+            LOG_ERROR("Failed to fill buffer for fd %d: %s", buf->fd, strerror(errno));
+            buf->curr_buffer_size = 0;
+            buf->pointer = 0;
+            return -1;
+        }
     }
+    else if(bytes_read == 0) {
+        LOG_DEBUG("Reached EOF when filling buffer for fd %d", buf->fd);
+    }
+    
+    buf->curr_buffer_size = bytes_read;
     buf->pointer = 0;
     LOG_DEBUG("Buffer filled for fd %d with %zd bytes", buf->fd, buf->curr_buffer_size);
     return buf->curr_buffer_size;
@@ -106,7 +112,7 @@ ssize_t rio_buffered_readline(rio_buf * buf, void * user_buf, size_t read_size) 
     char * user_bufp = (char *) user_buf;
     size_t total_bytes_read = 0;
     
-    while(total_bytes_read < read_size) {
+    while(total_bytes_read < read_size-1) {
         if(is_buffer_empty(buf)) {
             LOG_DEBUG("Buffer empty for fd %d, refilling", buf->fd);
             ssize_t fill_size = fill_buffer(buf);
@@ -127,10 +133,10 @@ ssize_t rio_buffered_readline(rio_buf * buf, void * user_buf, size_t read_size) 
 
         if(current_char == '\n'){ 
             LOG_DEBUG("Newline found, terminating readline for fd %d after %zu bytes", buf->fd, total_bytes_read);
-            *user_bufp = '\0';
             break;
         }
     }
+    *user_bufp = '\0';
     LOG_DEBUG("Completed buffered readline from fd %d, bytes read: %zu", buf->fd, total_bytes_read);
     return total_bytes_read;
 }
