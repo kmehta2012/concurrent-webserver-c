@@ -29,31 +29,36 @@ int main(int argc, char ** argv)  {
 
     printf("Enter line to echo : ");
     fflush(stdout);
+    int success_status = 0;
     for(ssize_t total_bytes = rio_buffered_readline(&stdin_buf, user_input, BUFFER_SIZE); total_bytes != 0; total_bytes = rio_buffered_readline(&stdin_buf, user_input, BUFFER_SIZE)) {
         if(total_bytes == -1) {
-            fprintf(stderr, "failed to read user input");
-            return -1;
+            fprintf(stderr, "failed to read user input. Closing connection");
+            success_status = -1;
+            break;
         }
         total_bytes = rio_unbuffered_write(clientfd, user_input, total_bytes); // write to the server
         if(total_bytes == -1) {
-            fprintf(stderr, "failed to write user input to server");
-            return -1;
+            fprintf(stderr, "failed to write user input to server. Closing connection");
+            success_status = -1;
+            break;
         }
         
         total_bytes = rio_buffered_readline(&stdout_buf, server_response, total_bytes); // read response from server to a buffer
         if(total_bytes == -1) {
-            fprintf(stderr, "failed to read echo response from server");
-            return -1;
+            fprintf(stderr, "failed to read echo response from server. Closing Connection");
+            success_status = -1;
+            break;
         }
 
         total_bytes = rio_unbuffered_write(STDOUT_FILENO, server_response, total_bytes); // write server response to STDOUT
         if(total_bytes == -1) {
-            fprintf(stderr, "failed to write server response to stdout");
-            return -1;
+            fprintf(stderr, "failed to write server response to stdout. Closing connection");
+            success_status = -1;
+            break;
         }
         printf("Enter line to echo : ");
         fflush(stdout);
     }
     close(clientfd);
-    return 0;
+    return success_status;
 }

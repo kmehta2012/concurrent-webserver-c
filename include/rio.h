@@ -76,7 +76,8 @@ static inline bool is_buffer_empty(rio_buf * buf) {
 
 
 /*
-fills user_buf with atmost read_size bytes of null terminated text data from buffer buf. Reads until read_size bytes are read or a \n is read. \n is replaced with a \0
+fills user_buf with atmost read_size - 1 bytes of null terminated text data from buffer buf. Reads until read_size - 1 bytes are read or a \n is read. 
+\0 is not considered part of the data for calculating read size
 Args
     rio_buf * buf - buffer from which we're reading
     void * user_buf - buffer to which we're reading

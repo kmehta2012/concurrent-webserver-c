@@ -43,6 +43,7 @@ int main(int argc, char ** argv)  {
                 break;
             }
         }
+        close(conn_fd);
     }  
     
     return 0;
