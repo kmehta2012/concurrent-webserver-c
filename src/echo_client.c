@@ -43,7 +43,7 @@ int main(int argc, char ** argv)  {
             break;
         }
         
-        total_bytes = rio_buffered_readline(&stdout_buf, server_response, total_bytes); // read response from server to a buffer
+        total_bytes = rio_buffered_readline(&stdout_buf, server_response, BUFFER_SIZE); // read response from server to a buffer
         if(total_bytes == -1) {
             fprintf(stderr, "failed to read echo response from server. Closing Connection");
             success_status = -1;
