@@ -6,7 +6,7 @@ Concurrent-webserver-c/
 │   ├── socket.h           # Socket operations (expanded from current utils)
 │   ├── worker.h           # Thread/process pool management
 │   ├── config.h           # Server configuration
-│   └── request_handler.h  # HTTP request handling
+│   ├── request_handler.h  # HTTP request handling
 │   └── rio.h              # robust I/O handling
 │   
 ├── src/
@@ -17,12 +17,22 @@ Concurrent-webserver-c/
 │   ├── worker.c
 │   ├── config.c
 │   ├── request_handler.c
-│   └── server.c           # Main server entry point
-|   └── rio.c  
+│   ├── server.c           # Main server entry point
+│   └── rio.c
+│
+├── public/                # Document root for web content
+│   ├── static/            # Static content (HTML, CSS, images, etc.)
+│   │   ├── index.html
+│   │   ├── css/
+│   │   ├── js/
+│   │   └── images/
+│   └── cgi-bin/           # Dynamic content (executable scripts)
+│
 ├── logs/
 │   ├── access.log         # Successful request logs
 │   ├── error.log          # Error logs
 │   └── debug.log          # Detailed debugging info
+│
 ├── testing/
 │   ├── unit/              # Unit tests for components
 │   │   ├── test_http_parser.c
@@ -34,15 +44,15 @@ Concurrent-webserver-c/
 │   ├── load/              # Load testing scripts
 │   │   └── benchmark.sh
 │   └── test_utils.h       # Common testing utilities
-├── static/                # Example static files to serve
-│   ├── index.html
-│   └── images/
+│
 ├── scripts/
 │   ├── setup.sh           # Environment setup
 │   └── deploy.sh          # Deployment scripts
+│
 ├── docs/
 │   ├── api.md             # API documentation
 │   └── design.md          # Design decisions
+│
 ├── .gitignore
 ├── Makefile
 ├── README.md

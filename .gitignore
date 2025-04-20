@@ -48,3 +48,6 @@
 **/lib/
 **/*.a
 **/*.lib
+
+# practise stuff
+practise/*

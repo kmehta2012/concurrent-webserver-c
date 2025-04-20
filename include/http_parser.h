@@ -3,6 +3,7 @@
 #define HTTP_PARSER
 #include <stdbool.h>
 
+#include "../include/config.h"
 #include "../include/rio.h"
 
 
@@ -51,26 +52,35 @@ Args
 Returns
     
 */
-int parse_http_request(rio_buf * request);
+http_request * parse_http_request(rio_buf * client_request, http_request * request, server_config * config);
 
 
 int parse_request_line(char * request_line, http_request * request);
 
-/*
-Parses URI to fill the following fields of request:
-1. path : relative path of the requested file (wrt to the server document root), 
-2. mime_type : MIME_TYPE determines if file is dynamic or static, 
-3. path : and gets the arguments if the file is dynamic. 
-4. is_dynamic
-5. param_names
-6. param_values
-7. param_count
-Args
-    URI : URI of a HTTP request
-*/
-int parse_uri(char * URI, http_request * request);
+/**
+ * Parses URI to fill the following fields of request:
+ * 1. path: relative path of the requested file (wrt to the server document root)
+ * 2. mime_type: MIME_TYPE determines if file is dynamic or static
+ * 3. is_dynamic: flag indicating if this is a dynamic request
+ * 4. param_names: array of parameter names (if dynamic)
+ * 5. param_values: array of parameter values (if dynamic)
+ * 6. param_count: number of parameters
+ * 
+ * Args:
+ *    char *URI: URI from the HTTP request
+ *    http_request *request: request structure to fill
+ *    server_config *config: server configuration settings
+ * 
+ * Returns:
+ *    0 on success, -1 on error
+ */
+int parse_uri(char * URI, http_request * request, server_config * config);
 
 
 int parse_request_headers(rio_buf * request);
+
+int url_decode(char * str);
+
+MIME_TYPE get_mime_type(const char *path);
 
 #endif

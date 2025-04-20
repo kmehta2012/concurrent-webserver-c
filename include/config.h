@@ -11,6 +11,8 @@ typedef struct {
     unsigned int connection_timeout; // Connection timeout in seconds
     bool enable_logging;       // Whether to enable logging
     char *log_directory;       // Directory for log files
+    char dynamic_dir_name; // Name of directory containing dynamic content
+    char static_dir_name; // Name of directory containing static contant
     // Other configuration parameters
 } server_config;
 
