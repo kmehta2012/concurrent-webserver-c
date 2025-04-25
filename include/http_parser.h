@@ -7,8 +7,6 @@
 #include "../include/rio.h"
 
 
-
-
 typedef enum {
     GET,
     POST,
@@ -81,6 +79,33 @@ int parse_request_headers(rio_buf * request);
 
 int url_decode(char * str);
 
+/*
+Returns the MIME type of a file with the passed path
+*/
 MIME_TYPE get_mime_type(const char *path);
+
+/**
+ * @brief 
+ * Free's all dynamically allocated members of request : 
+ * 1. path
+ * 2. param_names
+ * 3. param_values
+ * 
+ * It is assumed that request itself is statically allocated by the caller or if dynamically 
+ * allocated - it is free'd by the called
+ * 
+ * @param 
+ * request : http_request whose resources are to be deallocated
+ */
+void destory_request(http_request * request);
+
+/**
+ * @brief 
+ * Initializes the members of a http request struct to default values
+ * 
+ * @param 
+ * request : http request to initialize. 
+ */
+void initialize_request(http_request * request);
 
 #endif

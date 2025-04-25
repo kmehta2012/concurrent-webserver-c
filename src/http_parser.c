@@ -3,6 +3,7 @@
 #include <strings.h>
 #include "../include/rio.h"
 #include "../include/request_handler.h"
+#include "../include/utils.h"
 #include <stdio.h>
 #include <logger.h>
 #include <stdlib.h>
@@ -21,33 +22,43 @@ http_request * parse_http_request(rio_buf * client_request, http_request * reque
     rio_buffered_readline(client_request, request_line, BUFFER_SIZE);
     char METHOD[BUFFER_SIZE], URI[BUFFER_SIZE], VERSION[BUFFER_SIZE]; 
     
-    // NEED TO MAKE THIS SAFE. 
-    sscanf(request_line, "%s %s %s", METHOD, URI, VERSION);
+    int result = sscanf(request_line, 
+        "%" STR(BUFFER_SIZE-1) "s "
+        "%" STR(BUFFER_SIZE-1) "s "
+        "%" STR(BUFFER_SIZE-1) "s",
+        METHOD, URI, VERSION);
+
+    // Validate parsing success
+    if (result != 3) {
+    // Handle error - malformed request
+        LOG_ERROR("Error parsing request line");
+        return NULL;
+    }
 
     
     // Will add support for other methods soon
-    if(!strcmp("GET", METHOD)) {
+    if(strcmp("GET", METHOD)) {
         LOG_ERROR("Server only supports GET requests. Current HTTP request : %s", METHOD);
-        return -1;
+        return NULL;
     }
-    if(!strcmp("HTTP/1.1", VERSION) || !strcmp("HTTP/1.0", VERSION)){
+    if(strcmp("HTTP/1.1", VERSION) || strcmp("HTTP/1.0", VERSION)){
         LOG_ERROR("Only supports HTTP_1_1 and HTTP_1_0. Requested HTTP Version : %s. NOT SUPPORTED", VERSION);
-        return -1;
+        return NULL;
     }
-    if(URI[0] != '\\'){
-        LOG_ERROR("Invalid URI format. URI must start with \\. Passed URI starts with : %c", URI[0]);
-        return -1;
+    if(URI[0] != '/'){
+        LOG_ERROR("Invalid URI format. URI must start with /. Passed URI starts with : %c", URI[0]);
+        return NULL;
     }
     // Add a check to ensure that URI fits in BUFFER_SIZE
 
-    request->version = VERSION;
+    request->version = (strcmp(VERSION, "HTTP/1.0") == 0) ? HTTP_1_0 : HTTP_1_1;
     LOG_DEBUG("Set version to %s", VERSION);
     request->method = GET;
     LOG_DEBUG("Set method to %s", METHOD);
     
     if(parse_uri(URI, request, config) == -1) {
-        LOG_DEBUG("Parsing failed - Failed to parse URI");
-        return -1;
+        LOG_ERROR("Parsing failed - Failed to parse URI");
+        return NULL;
     }
 
     return request;
@@ -55,17 +66,18 @@ http_request * parse_http_request(rio_buf * client_request, http_request * reque
 
 
 int parse_uri(char *URI, http_request *request, server_config *config) {
+    
+    if(url_decode(URI)) {
+        LOG_ERROR("Failed to decode URI encoding.");
+        return -1;
+    }
+
     char *query_string = NULL;
-    char uri_copy[BUFFER_SIZE];
-    
-    // Make a copy of URI for modification. We assert that URI is of size atmost BUFFER_SIZE-1 in the caller code
-    strncpy(uri_copy, URI, BUFFER_SIZE-1);
-    uri_copy[BUFFER_SIZE - 1] = '\0';  // Ensure null termination
-    char * uri_ptr = uri_copy;
-    
+    char * uri_ptr = URI;
+
     // Check if URI contains query string. 
     // strchr(src, target) returns pointer to the first occurrence of char target in string src or NULL if nothing is found 
-    query_string = strchr(uri_copy, '?');
+    query_string = strchr(URI, '?');
     if (query_string) {
         *query_string = '\0';  // Split URI at '?'
         query_string++;        // Move pointer to start of query string
@@ -73,20 +85,21 @@ int parse_uri(char *URI, http_request *request, server_config *config) {
     
     // Determine if request is for static or dynamic content. Potential problem wouldn't uri_copy start with the backslash
     request->is_dynamic = false;
-    uri_ptr += 1;
-    if(strncmp(uri_ptr, config->dynamic_dir_name, strlen(config->dynamic_dir_name)) == 0) {
+    uri_ptr += 1; // to skip / so that uri_ptr points to the static/dynamic directory or just '\0'
+    if(!strncmp(uri_ptr, config->dynamic_dir_name, strlen(config->dynamic_dir_name))) {
         request->is_dynamic = true;
     }
     
-    // Decode URL encoding
-    url_decode(uri_copy);
     
-    // Set path in request
-    request->path = strdup(uri_copy);
+    // Set path in request. 
+    // The strdup() function allocates sufficient memory for a copy of the string s1, does the copy, and returns a pointer to it.  The pointer may subsequently be used as an argument to the function free(3).
+    request->path = strdup(URI); 
     if (!request->path) {
         LOG_ERROR("Memory allocation failed for request path. ERROR : %s", strerror(errno));
         return -1;
     }
+    // Determine MIME type based on file extension
+    request->mime_type = get_mime_type(request->path);
     
     // Process query string for dynamic requests
     if (request->is_dynamic && query_string) {
@@ -103,6 +116,7 @@ int parse_uri(char *URI, http_request *request, server_config *config) {
         request->param_names = (char**)malloc(count * sizeof(char*));
         request->param_values = (char**)malloc(count * sizeof(char*));
         
+        // free(NULL) is fine and does nothing
         if (!request->param_names || !request->param_values) {
             LOG_ERROR("Memory allocation failed for parameters");
             free(request->param_names);
@@ -119,12 +133,7 @@ int parse_uri(char *URI, http_request *request, server_config *config) {
             request->param_values[i] = NULL;
         }
         
-        // Parse parameters
-        char query_copy[BUFFER_SIZE];
-        strncpy(query_copy, query_string, BUFFER_SIZE);
-        query_copy[BUFFER_SIZE - 1] = '\0';
-        
-        char *token = strtok(query_copy, "&");
+        char *token = strtok(query_string, "&");
         int param_index = 0;
         
         while (token && param_index < count) {
@@ -132,11 +141,6 @@ int parse_uri(char *URI, http_request *request, server_config *config) {
             if (value) {
                 *value = '\0';  // Split token at '='
                 value++;        // Move to value portion
-                
-                // Decode URL encoding for both name and value
-                url_decode(token);
-                url_decode(value);
-                
                 request->param_names[param_index] = strdup(token);
                 request->param_values[param_index] = strdup(value);
                 
@@ -147,7 +151,6 @@ int parse_uri(char *URI, http_request *request, server_config *config) {
                 }
             } else {
                 // Handle parameters without values (e.g., "flag" in "?flag")
-                url_decode(token);
                 request->param_names[param_index] = strdup(token);
                 request->param_values[param_index] = strdup("");  // Empty string for value
                 
@@ -166,9 +169,6 @@ int parse_uri(char *URI, http_request *request, server_config *config) {
         request->param_names = NULL;
         request->param_values = NULL;
     }
-    
-    // Determine MIME type based on file extension
-    request->mime_type = get_mime_type(uri_copy);
     
     return 0;
 }
@@ -250,5 +250,31 @@ MIME_TYPE get_mime_type(const char *path) {
     } else {
         return TEXT_PLAIN;  // Default to plain text for unknown types
     }
+}
+
+void destory_request(http_request * request) {
+    if(request) {
+        free(request->path); // maintain the invariant that either this has not been free'd or is NULL
+        LOG_DEBUG("Free'd request->path");
+        if(request->param_count > 0) {
+            for(int i = 0; i < request->param_count; ++i) {
+                free(request->param_names[i]);
+                free(request->param_values[i]);
+            }
+            
+            free(request->param_names);
+            LOG_DEBUG("Free'd request->param_names");
+            free(request->param_values);
+            LOG_DEBUG("Free'd request->param_values");
+        }
+    }
+}
+
+void initialize_request(http_request * request) {
+    request->param_count = 0;
+    request->path = NULL;
+    request->param_names = NULL;
+    request->param_values = NULL;
+
 }
 
