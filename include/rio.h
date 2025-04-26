@@ -43,8 +43,11 @@ ssize_t rio_unbuffered_write(int fd, void * buf, size_t write_size);
 
 
 /*
-associates buffer buf with fd, and fills buf with upto BUFFER_SIZE bytes of data from fd
+associates buffer buf with fd. No data is read into the buffer here.
 
+Sets buf->fd = fd;
+     buf->curr_buffer_size = 0;
+     buf->pointer = 0;
 Args
     int fd - file descriptor of the file we're reading from
     rio_buf * buf - buffer in which we'll store the read data

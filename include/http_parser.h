@@ -97,7 +97,7 @@ MIME_TYPE get_mime_type(const char *path);
  * @param 
  * request : http_request whose resources are to be deallocated
  */
-void destory_request(http_request * request);
+void destroy_request(http_request * request);
 
 /**
  * @brief 

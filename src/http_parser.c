@@ -5,16 +5,28 @@
 #include "../include/request_handler.h"
 #include "../include/utils.h"
 #include <stdio.h>
-#include <logger.h>
+#include "../include/logger.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
 #include "../include/logger.h"
 
+#define MAX_URI_LENGTH 4096
 
 
+/*
+TO DO:
+
+Implement sanitization and normalization to avoid injections. 
+Will do this probably after STAGE 3
+*/
 http_request * parse_http_request(rio_buf * client_request, http_request * request, server_config * config) {
+    if (!request || !client_request || !config) {
+        LOG_ERROR("NULL parameter passed to parse_http_request");
+        return NULL;
+    }
+    
     // 1. Split the stirng by \r\n pair and strip \r\n from each splitted string 
 
     // 2. Read the HTTP method and the URI, call the respective method from request_handler.c to carry out the method on the file given by the URI
@@ -27,7 +39,11 @@ http_request * parse_http_request(rio_buf * client_request, http_request * reque
         "%" STR(BUFFER_SIZE-1) "s "
         "%" STR(BUFFER_SIZE-1) "s",
         METHOD, URI, VERSION);
-
+    
+    if(strlen(URI) > MAX_URI_LENGTH) {
+        LOG_ERROR("URI path exceeds maximum allowed length");
+        return -1;
+    }
     // Validate parsing success
     if (result != 3) {
     // Handle error - malformed request
@@ -41,7 +57,7 @@ http_request * parse_http_request(rio_buf * client_request, http_request * reque
         LOG_ERROR("Server only supports GET requests. Current HTTP request : %s", METHOD);
         return NULL;
     }
-    if(strcmp("HTTP/1.1", VERSION) || strcmp("HTTP/1.0", VERSION)){
+    if(strcmp("HTTP/1.1", VERSION) != 0 && strcmp("HTTP/1.0", VERSION) != 0){
         LOG_ERROR("Only supports HTTP_1_1 and HTTP_1_0. Requested HTTP Version : %s. NOT SUPPORTED", VERSION);
         return NULL;
     }
@@ -252,7 +268,7 @@ MIME_TYPE get_mime_type(const char *path) {
     }
 }
 
-void destory_request(http_request * request) {
+void destroy_request(http_request * request) {
     if(request) {
         free(request->path); // maintain the invariant that either this has not been free'd or is NULL
         LOG_DEBUG("Free'd request->path");
@@ -270,11 +286,21 @@ void destory_request(http_request * request) {
     }
 }
 
-void initialize_request(http_request * request) {
-    request->param_count = 0;
+void initialize_request(http_request *request) {
+    // Set pointers to NULL
     request->path = NULL;
     request->param_names = NULL;
     request->param_values = NULL;
-
+    
+    // Set integer values to 0
+    request->param_count = 0;
+    
+    // Set enum values to their default/initial states
+    request->method = GET;          // Default to GET as the most common method
+    request->version = HTTP_1_1;    // Default to HTTP/1.1 as the most common version
+    request->mime_type = TEXT_PLAIN; // Default to plain text
+    
+    // Set boolean values to false
+    request->is_dynamic = false;    // Default to static content
 }
 

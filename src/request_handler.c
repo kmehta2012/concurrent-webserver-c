@@ -19,6 +19,7 @@ int serve_static(http_request *request, int client_fd, server_config *config) {
     
 
     */
+   if r
 
 
 
