@@ -35,7 +35,7 @@ typedef struct {
     HTTP_VERSION version;
     MIME_TYPE mime_type;
     HTTP_METHOD method;
-    char* path;           // The relative file path
+    char* path;           // The absolute file path
     bool is_dynamic;      // Flag indicating if this is a dynamic request
     char** param_names;   // Array of parameter names (if dynamic)
     char** param_values;  // Array of parameter values (if dynamic)

@@ -62,7 +62,7 @@ int execute_request(http_request *request, int client_fd, server_config *config)
  * Returns:
  *    0 on success, -1 on error
  */
-int serve_static(http_request *request, int client_fd, server_config *config);
+int serve_static(http_request *request, http_response * response, int client_fd, server_config *config);
 
 /**
  * Serves dynamic content by executing the CGI script
@@ -88,6 +88,10 @@ int serve_dynamic(http_request *request, int client_fd, server_config *config);
  * Returns:
  *    0 on success, -1 on error
  */
-int send_error_response(int client_fd, int status_code, const char *reason);
+
+
+char * generate_response_header(http_response * response);
+
+void initialize_response(http_response * response);
 
 #endif
