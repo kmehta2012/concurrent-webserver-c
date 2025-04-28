@@ -9,7 +9,6 @@
 char * get_absolute_path(http_request * request, server_config * config) {
     size_t document_root_path_length = strlen(config->document_root);
     size_t requested_file_path_length = strlen(request->path);
-
     size_t abs_path_len = document_root_path_length + requested_file_path_length; 
 
     if(abs_path_len + 1 == PATH_MAX) { // also need to store the null terminator

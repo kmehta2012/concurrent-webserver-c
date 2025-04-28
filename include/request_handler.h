@@ -92,6 +92,20 @@ int serve_dynamic(http_request *request, int client_fd, server_config *config);
 
 char * generate_response_header(http_response * response);
 
+/**
+ * @brief Get the absolute path of requested file.
+ * Concatenates request->path with config->document_root
+ * 
+ * The caller must free the returned string. 
+ * 
+ * @param request : client request struct containing the relative path of the file
+ * @param config : server config struct containing the absolute path 
+ * @return The absolute file path on success, NULL if length of absolute path > PATH_MAX - 1
+ */
+char * get_absolute_path(http_request * request, server_config * config);
+
+
+
 void initialize_response(http_response * response);
 
 #endif
