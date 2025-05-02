@@ -5,6 +5,53 @@
 #include <fcntl.h>   // For open() flags like O_RDONLY
 #include <errno.h>
 #include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <time.h>
+
+
+void initialize_response(http_response *response) {
+    if (!response) {
+        LOG_ERROR("NULL response passed to initialize_response");
+        return;
+    }
+    
+    // Set status information to default values
+    response->status_code = 200;  // Default to OK
+    response->reason = "OK";
+    
+    // Set standard headers to NULL - they'll be set as needed
+    response->server = "TuringBolt/0.1"; // perhaps I'll figure out a better name eventually
+    
+    // Generate current date in HTTP format
+    time_t now = time(NULL);
+    struct tm *tm_info = gmtime(&now);
+    char date_buf[64];
+    strftime(date_buf, sizeof(date_buf), "%a, %d %b %Y %H:%M:%S GMT", tm_info);
+    response->date = strdup(date_buf);  // Allocate and copy date string
+    
+    // Initialize content-related fields
+    response->content_type = NULL;
+    response->content_length = 0;
+    response->content_encoding = NULL;
+    response->last_modified = NULL;
+    
+    // Set connection management
+    response->connection = "close";  // Default to closing connection
+    
+    // Initialize caching fields
+    response->cache_control = NULL;
+    response->etag = NULL;
+    
+    // Initialize body fields
+    response->body = NULL;
+    response->is_file = false;
+    
+    // Initialize extra headers array
+    response->extra_header_names = NULL;
+    response->extra_header_values = NULL;
+    response->extra_header_count = 0;
+}
 
 char * get_absolute_path(http_request * request, server_config * config) {
     size_t document_root_path_length = strlen(config->document_root);
@@ -21,6 +68,76 @@ char * get_absolute_path(http_request * request, server_config * config) {
     return abs_file_path;
 }
 
+/**
+ * Converts MIME_TYPE enum to corresponding Content-Type string
+ * 
+ * Args:
+ *    MIME_TYPE mime_type: The MIME type enum value
+ * 
+ * Returns:
+ *    const char*: String representation of the Content-Type
+ */
+static const char* mime_type_to_string(MIME_TYPE mime_type) {
+    switch (mime_type) {
+        case TEXT_HTML:
+            return "text/html";
+        case TEXT_PLAIN:
+            return "text/plain";
+        case APPLICATION_POSTSCRIPT:
+            return "application/postscript";
+        case IMAGE_GIF:
+            return "image/gif";
+        case IMAGE_PNG:
+            return "image/png";
+        case IMAGE_JPEG:
+            return "image/jpeg";
+        default:
+            return "application/octet-stream";  // Default binary type
+    }
+}
+
+
+int set_content_headers(int fd, http_request *request, http_response *response, const char *file_path) {
+    if (!response || fd < 0 || !request) {
+        LOG_ERROR("Invalid parameters passed to set_content_headers");
+        return -1;
+    }
+    
+    // Get file information including size and modification time
+    struct stat file_stat;
+    if (fstat(fd, &file_stat) < 0) {
+        LOG_ERROR("Failed to get file stats for %s: %s", file_path, strerror(errno));
+        return -1;
+    }
+    
+    // Set Content-Length based on file size
+    response->content_length = file_stat.st_size;
+    
+    // Set Content-Type based on MIME type from request
+    response->content_type = mime_type_to_string(request->mime_type);
+    
+    // Set Last-Modified header
+    struct tm *tm_info = gmtime(&file_stat.st_mtime);
+    char last_mod_buf[64];
+    strftime(last_mod_buf, sizeof(last_mod_buf), "%a, %d %b %Y %H:%M:%S GMT", tm_info);
+    
+    // Free existing value if present
+    if (response->last_modified) {
+        free(response->last_modified);
+    }
+    
+    response->last_modified = strdup(last_mod_buf);
+    if (!response->last_modified) {
+        LOG_ERROR("Failed to allocate memory for Last-Modified header");
+        return -1;
+    }
+    
+    // Set Content-Encoding (default is NULL, meaning no encoding). will add support for this later if i want to. 
+    response->content_encoding = NULL;
+    
+    return 0;
+}
+
 int execute_request(http_request *request, int client_fd, server_config *config) {
     http_response response;
     initialize_response(&response);
@@ -34,10 +151,10 @@ int execute_request(http_request *request, int client_fd, server_config *config)
     if(status == -1){
         char * response_header = generate_response_header(&response);
         if(rio_unbuffered_write(client_fd, response_header, strlen(response_header)) == -1) {
-            return -1;
+            return -1; // if the error write failed then just gracefully close the connection without doing anything. Caller will do this. 
         }
     }
-    return 0; // if the error write failed then just gracefully close the connection without doing anything. Caller will do this. 
+    return 0; 
 }
 
 int serve_static(http_request *request, http_response * response, int client_fd, server_config *config) {
@@ -75,21 +192,35 @@ int serve_static(http_request *request, http_response * response, int client_fd,
                 break;
         }
         free(abs_file_path);
+        close(fd);
         return -1;
     }
+    set_content_headers(fd, request, response, abs_file_path);
     free(abs_file_path);
 
     response->status_code = 200;
     response->reason = "OK";
+
+    
     char * response_header = generate_response_header(response);
+
+    if(!response_header) {
+        LOG_ERROR("Error in generating response header");
+        response->status_code = 500;
+        response->reason = "Internal Server Error";
+        close(fd);
+        return -1;
+    }
 
     // Commit to the response header even if the read/write from/to file/socket fail.
 
     if(rio_unbuffered_write(client_fd, response_header, strlen(response_header)) == -1) {
         response->status_code = 500;
         response->reason = "Internal Server Error";
+        free(response_header);
         return -1;
     }
+    free(response_header);
 
     char read_buffer[BUFFER_SIZE];
     ssize_t read_size = 0;
@@ -98,10 +229,164 @@ int serve_static(http_request *request, http_response * response, int client_fd,
         if(read_size < 0 || rio_unbuffered_write(client_fd, read_buffer, read_size) == -1) {
             response->status_code = 500;
             response->reason = "Internal Server Error";
+            close(fd);
             return -1;
         }
     }while(read_size > 0);
-
+    
+    close(fd);
     return 0;
+}
+
+char* generate_response_header(http_response* response) {
+    if (!response) {
+        LOG_ERROR("NULL response passed to generate_response_header");
+        return NULL;
+    }
+
+    // Calculate approximate size needed for header buffer
+    // Start with reasonable base size for status line and common headers
+    size_t header_size = 256;
+    
+    // Add space for content-length digits (20 chars should be enough for even very large files)
+    header_size += 20;
+    
+    // Add space for content-type
+    if (response->content_type) {
+        header_size += strlen(response->content_type) + 16; // "Content-Type: " + content
+    }
+    
+    // Add space for other headers if they exist
+    if (response->date) 
+        header_size += strlen(response->date) + HDR_DATE_PREFIX_LEN + CRLF_LEN;
+        
+    if (response->server) 
+        header_size += strlen(response->server) + HDR_SERVER_PREFIX_LEN + CRLF_LEN;
+        
+    if (response->connection) 
+        header_size += strlen(response->connection) + HDR_CONNECTION_PREFIX_LEN + CRLF_LEN;
+        
+    if (response->last_modified) 
+        header_size += strlen(response->last_modified) + HDR_LASTMOD_PREFIX_LEN + CRLF_LEN;
+        
+    if (response->content_encoding) 
+        header_size += strlen(response->content_encoding) + HDR_CONTENT_ENC_PREFIX_LEN + CRLF_LEN;
+        
+    if (response->cache_control) 
+        header_size += strlen(response->cache_control) + HDR_CACHE_CTRL_PREFIX_LEN + CRLF_LEN;
+        
+    if (response->etag) 
+        header_size += strlen(response->etag) + HDR_ETAG_PREFIX_LEN + CRLF_LEN;
+    
+    // Add space for extra headers
+    for (int i = 0; i < response->extra_header_count; i++) {
+        if (response->extra_header_names[i] && response->extra_header_values[i]) {
+            header_size += strlen(response->extra_header_names[i]) + 
+                          strlen(response->extra_header_values[i]) + 4; // name + ": " + value + "\r\n"
+        }
+    }
+    
+    // Allocate memory for the header
+    char* header = (char*)malloc(header_size);
+    if (!header) {
+        LOG_ERROR("Failed to allocate memory for response header");
+        return NULL;
+    }
+    
+    // Start with empty string
+    header[0] = '\0';
+    
+    // Add status line
+    char status_line[128];
+    snprintf(status_line, sizeof(status_line), "HTTP/1.1 %d %s\r\n", 
+             response->status_code, response->reason ? response->reason : "Unknown");
+    strcat(header, status_line);
+    
+    // Add standard headers if they exist
+    if (response->date) {
+        char date_header[128];
+        snprintf(date_header, sizeof(date_header), "Date: %s\r\n", response->date);
+        strcat(header, date_header);
+    }
+    
+    if (response->server) {
+        char server_header[128];
+        snprintf(server_header, sizeof(server_header), "Server: %s\r\n", response->server);
+        strcat(header, server_header);
+    }
+    
+    if (response->connection) {
+        char connection_header[128];
+        snprintf(connection_header, sizeof(connection_header), "Connection: %s\r\n", response->connection);
+        strcat(header, connection_header);
+    }
+    
+    if (response->last_modified) {
+        char last_modified_header[128];
+        snprintf(last_modified_header, sizeof(last_modified_header), "Last-Modified: %s\r\n", 
+                response->last_modified);
+        strcat(header, last_modified_header);
+    }
+    
+    // Add caching headers if they exist
+    if (response->cache_control) {
+        char cache_control_header[128];
+        snprintf(cache_control_header, sizeof(cache_control_header), "Cache-Control: %s\r\n", 
+                response->cache_control);
+        strcat(header, cache_control_header);
+    }
+    
+    if (response->etag) {
+        char etag_header[128];
+        snprintf(etag_header, sizeof(etag_header), "ETag: %s\r\n", response->etag);
+        strcat(header, etag_header);
+    }
+    
+    // Add content headers
+    if (response->content_type) {
+        char content_type_header[128];
+        snprintf(content_type_header, sizeof(content_type_header), "Content-Type: %s\r\n", 
+                response->content_type);
+        strcat(header, content_type_header);
+    }
+    
+    // Always include Content-Length
+    char content_length_header[64];
+    snprintf(content_length_header, sizeof(content_length_header), "Content-Length: %zu\r\n", 
+            response->content_length);
+    strcat(header, content_length_header);
+    
+    if (response->content_encoding) {
+        char content_encoding_header[128];
+        snprintf(content_encoding_header, sizeof(content_encoding_header), "Content-Encoding: %s\r\n", 
+                response->content_encoding);
+        strcat(header, content_encoding_header);
+    }
+    
+    // Add any extra headers
+    for (int i = 0; i < response->extra_header_count; i++) {
+        if (response->extra_header_names[i] && response->extra_header_values[i]) {
+            char extra_header[256];
+            snprintf(extra_header, sizeof(extra_header), "%s: %s\r\n", 
+                    response->extra_header_names[i], response->extra_header_values[i]);
+            strcat(header, extra_header);
+        }
+    }
+    
+    // Add the final CRLF that separates headers from body
+    strcat(header, "\r\n");
+    
+    return header;
+}
+
+void destroy_response(http_response * response) {
+    free(response->date);
+    for(int i = 0; i < response->extra_header_count; ++i) {
+        free(response->extra_header_names[i]);
+        free(response->extra_header_values[i]);
+    }
+    free(response->extra_header_names);
+    free(response->extra_header_values);
+    free(response);
 }
 
