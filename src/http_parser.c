@@ -102,8 +102,13 @@ int parse_uri(char *URI, http_request *request, server_config *config) {
     // Determine if request is for static or dynamic content. Potential problem wouldn't uri_copy start with the backslash
     request->is_dynamic = false;
     uri_ptr += 1; // to skip / so that uri_ptr points to the static/dynamic directory or just '\0'
-    if(!strncmp(uri_ptr, config->dynamic_dir_name, strlen(config->dynamic_dir_name))) {
-        request->is_dynamic = true;
+    size_t dynamic_dir_len = strlen(config->dynamic_dir_name);
+    if (!strncmp(uri_ptr, config->dynamic_dir_name, dynamic_dir_len)) {
+        // Check if this is a complete path component by verifying that
+        // the next character is either '/' or '\0'
+        if (uri_ptr[dynamic_dir_len] == '/' || uri_ptr[dynamic_dir_len] == '\0') {
+            request->is_dynamic = true;
+        }
     }
     
     
@@ -148,7 +153,7 @@ int parse_uri(char *URI, http_request *request, server_config *config) {
             request->param_names[i] = NULL;
             request->param_values[i] = NULL;
         }
-        
+        // strtok() modifies the query_string in-place by inserting null terminators in-place of the passed delimeter. 
         char *token = strtok(query_string, "&");
         int param_index = 0;
         

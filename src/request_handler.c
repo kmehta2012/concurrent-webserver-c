@@ -25,9 +25,12 @@ void initialize_response(http_response *response) {
     
     // Generate current date in HTTP format
     time_t now = time(NULL);
-    struct tm *tm_info = gmtime(&now);
+    
+    struct tm tm_info;
+    gmtime_r(&now, &tm_info);
+    
     char date_buf[64];
-    strftime(date_buf, sizeof(date_buf), "%a, %d %b %Y %H:%M:%S GMT", tm_info);
+    strftime(date_buf, sizeof(date_buf), "%a, %d %b %Y %H:%M:%S GMT", &tm_info);
     response->date = strdup(date_buf);  // Allocate and copy date string
     
     // Initialize content-related fields
@@ -151,8 +154,10 @@ int execute_request(http_request *request, int client_fd, server_config *config)
     if(status == -1){
         char * response_header = generate_response_header(&response);
         if(rio_unbuffered_write(client_fd, response_header, strlen(response_header)) == -1) {
+            free(response_header);
             return -1; // if the error write failed then just gracefully close the connection without doing anything. Caller will do this. 
         }
+        free(response_header);
     }
     return 0; 
 }
@@ -192,7 +197,6 @@ int serve_static(http_request *request, http_response * response, int client_fd,
                 break;
         }
         free(abs_file_path);
-        close(fd);
         return -1;
     }
     set_content_headers(fd, request, response, abs_file_path);
@@ -237,6 +241,7 @@ int serve_static(http_request *request, http_response * response, int client_fd,
     close(fd);
     return 0;
 }
+
 
 char* generate_response_header(http_response* response) {
     if (!response) {
@@ -387,6 +392,5 @@ void destroy_response(http_response * response) {
     }
     free(response->extra_header_names);
     free(response->extra_header_values);
-    free(response);
 }
 
