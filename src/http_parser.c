@@ -1,16 +1,16 @@
-#include "../include/http_parser.h"
+#include "http_parser.h"
 #include <string.h>
 #include <strings.h>
-#include "../include/rio.h"
-#include "../include/request_handler.h"
-#include "../include/utils.h"
+#include "rio.h"
+#include "request_handler.h"
+#include "utils.h"
 #include <stdio.h>
-#include "../include/logger.h"
+#include "logger.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
-#include "../include/logger.h"
+#include "logger.h"
 
 #define MAX_URI_LENGTH 4096
 
@@ -21,7 +21,9 @@ TO DO:
 Implement sanitization and normalization to avoid injections. 
 Will do this probably after STAGE 3
 */
-http_request * parse_http_request(rio_buf * client_request, http_request * request, server_config * config) {
+
+
+http_request * parse_http_request(char * client_request, http_request * request, server_config * config) {
     if (!request || !client_request || !config) {
         LOG_ERROR("NULL parameter passed to parse_http_request");
         return NULL;
@@ -30,8 +32,19 @@ http_request * parse_http_request(rio_buf * client_request, http_request * reque
     // 1. Split the stirng by \r\n pair and strip \r\n from each splitted string 
 
     // 2. Read the HTTP method and the URI, call the respective method from request_handler.c to carry out the method on the file given by the URI
+    char * crlf = strstr(client_request, "\r\n");
+    if (!crlf) {
+        LOG_ERROR("Malformed request - no CRLF found");
+        return -1;
+    }
+    int line_length = crlf - client_request; 
+    if(line_length >= BUFFER_SIZE) { // We need it to be atleast one smaller than buffer size to incorporate a null character
+        LOG_ERROR("Request line length exceeds maximum allowed length");
+        return -1;
+    }
     char request_line[BUFFER_SIZE];
-    rio_buffered_readline(client_request, request_line, BUFFER_SIZE);
+    strncpy(request_line, client_request, line_length);
+    request_line[line_length] = '\0';
     char METHOD[BUFFER_SIZE], URI[BUFFER_SIZE], VERSION[BUFFER_SIZE]; 
     
     int result = sscanf(request_line, 

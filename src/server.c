@@ -1,12 +1,12 @@
-#include "../include/net.h"
-#include "../include/rio.h"
+#include "net.h"
+#include "rio.h"
 #include <stdio.h>
 #include <sys/socket.h>
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
-#include "../include/http_parser.h"
-#include "../include/request_handler.h"
+#include "http_parser.h"
+#include "request_handler.h"
 
 int main(int argc, char ** argv)  {
     if(argc == 1 || argc > 2) {

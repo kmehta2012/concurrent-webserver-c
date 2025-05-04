@@ -1,6 +1,6 @@
-#include "../include/rio.h"
-#include "../include/utils.h"
-#include "../include/logger.h"
+#include "rio.h"
+#include "utils.h"
+#include "logger.h"
 #include <unistd.h> // for read and write
 #include <stdio.h>
 #include <errno.h>

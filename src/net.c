@@ -1,5 +1,5 @@
-#include "../include/net.h"
-#include "../include/logger.h"
+#include "net.h"
+#include "logger.h"
 #include <sys/socket.h>
 #include <netdb.h>
 #include <string.h>

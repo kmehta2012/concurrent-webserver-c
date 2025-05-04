@@ -1,6 +1,6 @@
-#include "../include/request_handler.h"
-#include "../include/rio.h"
-#include "../include/logger.h"
+#include "request_handler.h"
+#include "rio.h"
+#include "logger.h"
 #include <limits.h>  // For PATH_MAX
 #include <fcntl.h>   // For open() flags like O_RDONLY
 #include <errno.h>

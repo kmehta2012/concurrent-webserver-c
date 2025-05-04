@@ -50,7 +50,7 @@ Args
 Returns
     
 */
-http_request * parse_http_request(rio_buf * client_request, http_request * request, server_config * config);
+http_request * parse_http_request(char * client_request, http_request * request, server_config * config);
 
 
 int parse_request_line(char * request_line, http_request * request);
