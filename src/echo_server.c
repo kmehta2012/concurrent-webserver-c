@@ -1,5 +1,5 @@
-#include "../include/net.h"
-#include "../include/rio.h"
+#include "net.h"
+#include "rio.h"
 #include <stdio.h>
 #include <sys/socket.h>
 #include <errno.h>
