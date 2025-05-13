@@ -35,27 +35,29 @@ http_request * parse_http_request(char * client_request, http_request * request,
     char * crlf = strstr(client_request, "\r\n");
     if (!crlf) {
         LOG_ERROR("Malformed request - no CRLF found");
-        return -1;
+        return NULL;
     }
     int line_length = crlf - client_request; 
     if(line_length >= BUFFER_SIZE) { // We need it to be atleast one smaller than buffer size to incorporate a null character
         LOG_ERROR("Request line length exceeds maximum allowed length");
-        return -1;
+        return NULL;
     }
     char request_line[BUFFER_SIZE];
     strncpy(request_line, client_request, line_length);
     request_line[line_length] = '\0';
-    char METHOD[BUFFER_SIZE], URI[BUFFER_SIZE], VERSION[BUFFER_SIZE]; 
     
-    int result = sscanf(request_line, 
-        "%" STR(BUFFER_SIZE-1) "s "
-        "%" STR(BUFFER_SIZE-1) "s "
-        "%" STR(BUFFER_SIZE-1) "s",
-        METHOD, URI, VERSION);
+    char METHOD[BUFFER_SIZE], URI[BUFFER_SIZE], VERSION[BUFFER_SIZE]; 
+    char sscanf_format_string[100];
+    sprintf(sscanf_format_string, "%%%ds %%%ds %%%ds",
+        BUFFER_SIZE - 1,
+        BUFFER_SIZE - 1,
+        BUFFER_SIZE - 1);
+
+    int result = sscanf(request_line, sscanf_format_string, METHOD, URI, VERSION);
     
     if(strlen(URI) > MAX_URI_LENGTH) {
         LOG_ERROR("URI path exceeds maximum allowed length");
-        return -1;
+        return NULL;
     }
     // Validate parsing success
     if (result != 3) {

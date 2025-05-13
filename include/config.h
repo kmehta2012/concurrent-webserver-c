@@ -15,7 +15,6 @@ typedef struct {
     char * static_dir_name; // Name of directory containing static contant
     unsigned int thread_pool_size;  // Number of worker threads (for threaded version)
     unsigned int connection_timeout; // Connection timeout in seconds
-    bool enable_logging;       // Whether to enable logging
     // Other configuration parameters
 } server_config;
 
