@@ -6,6 +6,7 @@
 #include "../include/config.h"
 #include "../include/rio.h"
 
+#define MAX_URI_LENGTH 4096
 
 typedef enum {
     GET,

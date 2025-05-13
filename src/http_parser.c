@@ -11,7 +11,7 @@
 #include <inttypes.h>
 #include "logger.h"
 
-#define MAX_URI_LENGTH 4096
+
 
 
 /*
