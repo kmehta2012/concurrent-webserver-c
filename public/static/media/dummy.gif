@@ -1,0 +1,2 @@
+This is a dummy GIF file for testing image/gif MIME type detection.
+The actual content doesn't matter since we're only testing the extension-to-MIME mapping.

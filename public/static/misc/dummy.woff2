@@ -1,0 +1,2 @@
+This is a dummy WOFF2 font file for testing font/woff2 MIME type detection.
+The actual content doesn't matter since we're only testing the extension-to-MIME mapping.

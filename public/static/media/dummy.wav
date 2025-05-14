@@ -1,0 +1,2 @@
+This is a dummy WAV file for testing audio/wav MIME type detection.
+The actual content doesn't matter since we're only testing the extension-to-MIME mapping.
