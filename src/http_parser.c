@@ -280,6 +280,18 @@ MIME_TYPE get_mime_type(const char *path) {
         return TEXT_HTML;
     } else if (strcasecmp(ext, "txt") == 0) {
         return TEXT_PLAIN;
+    } else if (strcasecmp(ext, "css") == 0) {
+        return TEXT_CSS;
+    } else if (strcasecmp(ext, "js") == 0) {
+        return APPLICATION_JAVASCRIPT;
+    } else if (strcasecmp(ext, "json") == 0) {
+        return APPLICATION_JSON;
+    } else if (strcasecmp(ext, "xml") == 0) {
+        return APPLICATION_XML;
+    } else if (strcasecmp(ext, "pdf") == 0) {
+        return APPLICATION_PDF;
+    } else if (strcasecmp(ext, "zip") == 0) {
+        return APPLICATION_ZIP;
     } else if (strcasecmp(ext, "ps") == 0) {
         return APPLICATION_POSTSCRIPT;
     } else if (strcasecmp(ext, "gif") == 0) {
@@ -288,6 +300,20 @@ MIME_TYPE get_mime_type(const char *path) {
         return IMAGE_PNG;
     } else if (strcasecmp(ext, "jpg") == 0 || strcasecmp(ext, "jpeg") == 0) {
         return IMAGE_JPEG;
+    } else if (strcasecmp(ext, "svg") == 0) {
+        return IMAGE_SVG;
+    } else if (strcasecmp(ext, "mp3") == 0) {
+        return AUDIO_MPEG;
+    } else if (strcasecmp(ext, "wav") == 0) {
+        return AUDIO_WAV;
+    } else if (strcasecmp(ext, "mp4") == 0) {
+        return VIDEO_MP4;
+    } else if (strcasecmp(ext, "webm") == 0) {
+        return VIDEO_WEBM;
+    } else if (strcasecmp(ext, "woff") == 0) {
+        return FONT_WOFF;
+    } else if (strcasecmp(ext, "woff2") == 0) {
+        return FONT_WOFF2;
     } else {
         return TEXT_PLAIN;  // Default to plain text for unknown types
     }

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<server>
+  <name>Web Server</name>
+  <version>1.0</version>
+  <features>
+    <feature>HTML</feature>
+    <feature>CSS</feature>
+    <feature>JavaScript</feature>
+    <feature>JSON</feature>
+    <feature>XML</feature>
+  </features>
+  <status>
+    <running>true</running>
+    <uptime>10234</uptime>
+  </status>
+</server>

@@ -86,6 +86,18 @@ static const char* mime_type_to_string(MIME_TYPE mime_type) {
             return "text/html";
         case TEXT_PLAIN:
             return "text/plain";
+        case TEXT_CSS:
+            return "text/css";
+        case APPLICATION_JAVASCRIPT:
+            return "application/javascript";
+        case APPLICATION_JSON:
+            return "application/json";
+        case APPLICATION_XML:
+            return "application/xml";
+        case APPLICATION_PDF:
+            return "application/pdf";
+        case APPLICATION_ZIP:
+            return "application/zip";
         case APPLICATION_POSTSCRIPT:
             return "application/postscript";
         case IMAGE_GIF:
@@ -94,6 +106,20 @@ static const char* mime_type_to_string(MIME_TYPE mime_type) {
             return "image/png";
         case IMAGE_JPEG:
             return "image/jpeg";
+        case IMAGE_SVG:
+            return "image/svg+xml";
+        case AUDIO_MPEG:
+            return "audio/mpeg";
+        case AUDIO_WAV:
+            return "audio/wav";
+        case VIDEO_MP4:
+            return "video/mp4";
+        case VIDEO_WEBM:
+            return "video/webm";
+        case FONT_WOFF:
+            return "font/woff";
+        case FONT_WOFF2:
+            return "font/woff2";
         default:
             return "application/octet-stream";  // Default binary type
     }

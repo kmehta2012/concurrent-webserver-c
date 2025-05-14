@@ -1,0 +1,28 @@
+.grid-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.flex-container {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.animated-box {
+    background-color: salmon;
+    width: 100px;
+    height: 100px;
+    transition: transform 0.3s ease-in-out;
+}
+
+.animated-box:hover {
+    transform: scale(1.1);
+}
+
+@media (max-width: 600px) {
+    .grid-container {
+        grid-template-columns: 1fr;
+    }
+}

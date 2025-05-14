@@ -1,0 +1,9 @@
+{
+    "name": "Web Server",
+    "version": "1.0",
+    "features": ["HTML", "CSS", "JavaScript", "JSON", "XML"],
+    "status": {
+      "running": true,
+      "uptime": 10234
+    }
+  }

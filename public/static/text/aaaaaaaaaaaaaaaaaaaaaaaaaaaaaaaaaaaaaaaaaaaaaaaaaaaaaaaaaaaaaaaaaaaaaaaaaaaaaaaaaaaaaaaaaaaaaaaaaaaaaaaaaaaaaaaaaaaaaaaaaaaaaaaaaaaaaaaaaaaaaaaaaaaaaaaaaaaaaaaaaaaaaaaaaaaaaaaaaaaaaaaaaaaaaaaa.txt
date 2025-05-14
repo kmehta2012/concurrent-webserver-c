@@ -1,0 +1,1 @@
+This file has a very long filename used to test path handling and filesystem edge cases.
