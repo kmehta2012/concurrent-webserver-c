@@ -340,15 +340,33 @@ START_TEST(test_serve_static_missing_file)
     // Close write end to signal EOF to read end
     safe_close_pipe(&pipe_fds[1]);
     
-    // Response should have 404 status
+    // Response should have 404 status code and reason
     ck_assert_int_eq(response.status_code, 404);
     ck_assert_str_eq(response.reason, "Not Found");
     
-    // Read what was sent to the "client"
+    // No data should have been written to the pipe yet 
+    // (error headers are the responsibility of execute_request)
+    char buffer[128] = {0};
+    ssize_t bytes_read = read(pipe_fds[0], buffer, sizeof(buffer));
+    ck_assert_int_eq(bytes_read, 0); // Pipe should be empty
+    
+    // Now let's verify the full error handling flow works by calling execute_request
+    // Reset the pipe
+    safe_close_pipe(&pipe_fds[0]);
+    if (pipe(pipe_fds) < 0) {
+        ck_abort_msg("Failed to create pipe");
+    }
+    
+    // Call execute_request, which should handle the error
+    result = execute_request(&request, pipe_fds[1], &config);
+    ck_assert_int_eq(result, 0); // execute_request should succeed
+    
+    // Close write end to signal EOF to read end
+    safe_close_pipe(&pipe_fds[1]);
+    
+    // Now we should have error headers in the pipe
     char *output = read_pipe_output();
     ck_assert_ptr_nonnull(output);
-    
-    // Should have sent an error response
     ck_assert(strstr(output, "HTTP/1.1 404 Not Found") != NULL);
     
     // Cleanup
@@ -399,21 +417,18 @@ START_TEST(test_serve_static_different_mime_types)
         {"/static/media/dummy.png", "image/png"},
         {"/static/misc/dummy.pdf", "application/pdf"}
     };
+
+    size_t total_test_files = sizeof(test_files) / sizeof(test_files[0]);
     
     // Setup common config
     config.document_root = strdup("./public/");
     
-    for (size_t i = 0; i < sizeof(test_files) / sizeof(test_files[0]); i++) {
+    for (size_t i = 0; i < total_test_files; i++) {
         // Setup for this iteration
         request.path = strdup(test_files[i][0]);
         request.mime_type = get_mime_type(request.path);
         request.is_dynamic = false;
-        
-        // Reset pipe for clean output
-        safe_close_pipe(&pipe_fds[0]);
-        safe_close_pipe(&pipe_fds[1]);
-        pipe(pipe_fds);
-        
+
         // Test
         int result = serve_static(&request, &response, pipe_fds[1], &config);
         
@@ -439,6 +454,14 @@ START_TEST(test_serve_static_different_mime_types)
         // Cleanup this iteration
         free(output);
         free(request.path);
+        request.path = NULL;
+        safe_close_pipe(&pipe_fds[0]);
+
+        // Create a pipe to capture socket output
+        if (pipe(pipe_fds) < 0) {
+            perror("pipe");
+            exit(EXIT_FAILURE);
+        }
     }
 }
 END_TEST
