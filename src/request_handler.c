@@ -8,6 +8,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
+
 
 
 void initialize_response(http_response *response) {
@@ -59,18 +61,26 @@ void initialize_response(http_response *response) {
 char * get_absolute_path(http_request * request, server_config * config) {
     size_t document_root_path_length = strlen(config->document_root);
     size_t requested_file_path_length = strlen(request->path);
-    size_t abs_path_len = document_root_path_length + requested_file_path_length; 
+    
+    // Skip the leading slash in request path if document_root ends with slash
+    size_t skip_slash = (document_root_path_length > 0 && 
+                      config->document_root[document_root_path_length-1] == '/' && 
+                      request->path[0] == '/') ? 1 : 0;
+    
+    size_t abs_path_len = document_root_path_length + requested_file_path_length - skip_slash;
 
-    if(abs_path_len + 1 == PATH_MAX) { // also need to store the null terminator
+    if(abs_path_len + 1 >= PATH_MAX) { // +1 for null terminator
         return NULL;
     }
     
-    char * abs_file_path = (char *) malloc(abs_path_len + 1); // +1 for the null terminator
+    char * abs_file_path = (char *) malloc(abs_path_len + 1);
     strcpy(abs_file_path, config->document_root);
-    strcat(abs_file_path, request->path);
+    
+    // Concatenate path, skipping leading slash if needed
+    strcat(abs_file_path, request->path + skip_slash);
+    
     return abs_file_path;
 }
-
 /**
  * Converts MIME_TYPE enum to corresponding Content-Type string
  * 
@@ -80,7 +90,7 @@ char * get_absolute_path(http_request * request, server_config * config) {
  * Returns:
  *    const char*: String representation of the Content-Type
  */
-static const char* mime_type_to_string(MIME_TYPE mime_type) {
+static char* mime_type_to_string(MIME_TYPE mime_type) {
     switch (mime_type) {
         case TEXT_HTML:
             return "text/html";
@@ -140,7 +150,7 @@ int set_content_headers(int fd, http_request *request, http_response *response, 
     }
     
     // Set Content-Length based on file size
-    response->content_length = file_stat.st_size;
+    response->content_length = (size_t) file_stat.st_size;
     
     // Set Content-Type based on MIME type from request
     response->content_type = mime_type_to_string(request->mime_type);
@@ -172,7 +182,7 @@ int execute_request(http_request *request, int client_fd, server_config *config)
     initialize_response(&response);
     int status;
     if(request->is_dynamic) {
-        status = serve_dynamic(request, client_fd, config);
+        status = -1;//serve_dynamic(request, client_fd, config);
     }
     else {
         status = serve_static(request, &response, client_fd, config);
@@ -256,8 +266,8 @@ int serve_static(http_request *request, http_response * response, int client_fd,
     ssize_t read_size = 0;
     do{
         read_size = rio_unbuffered_read(fd, read_buffer, BUFFER_SIZE);
-        if(read_size < 0 || rio_unbuffered_write(client_fd, read_buffer, read_size) == -1) {
-            response->status_code = 500;
+        if(read_size < 0 || rio_unbuffered_write(client_fd, read_buffer, (size_t) read_size) == -1) { // The explicit type cast is useless here but doing it to bypass the compilation flags
+            response->status_code = 500; 
             response->reason = "Internal Server Error";
             close(fd);
             return -1;
@@ -267,6 +277,10 @@ int serve_static(http_request *request, http_response * response, int client_fd,
     close(fd);
     return 0;
 }
+
+/* int serve_dynamic(http_request *request, int client_fd, server_config *config) {
+    return 0;
+} */
 
 
 char* generate_response_header(http_response* response) {

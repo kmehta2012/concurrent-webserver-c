@@ -61,16 +61,7 @@ typedef struct {
 void initialize_response(http_response *response);
 
 
-/**
- * Converts MIME_TYPE enum to corresponding Content-Type string
- * 
- * Args:
- *    MIME_TYPE mime_type: The MIME type enum value
- * 
- * Returns:
- *    const char*: String representation of the Content-Type
- */
-static const char* mime_type_to_string(MIME_TYPE mime_type);
+
 
 /**
  * Sets content-related headers in the HTTP response based on the file
@@ -123,7 +114,7 @@ int serve_static(http_request *request, http_response * response, int client_fd,
  * Returns:
  *    0 on success, -1 on error
  */
-int serve_dynamic(http_request *request, int client_fd, server_config *config);
+/* int serve_dynamic(http_request *request, int client_fd, server_config *config); */
 
 /**
  * Returns response header for client (including response line). Follows the following order for the headers. returned pointer must be free'd by the caller

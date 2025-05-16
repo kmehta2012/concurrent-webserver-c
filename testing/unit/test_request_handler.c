@@ -7,11 +7,13 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <errno.h>
+#include <limits.h>  // For PATH_MAX
+
 
 #include "request_handler.h"
 #include "http_parser.h"
 #include "config.h"
-#include "logger.h"
+#include "rio.h"
 
 /* Test fixtures */
 static http_request request;
@@ -44,18 +46,22 @@ static void teardown(void) {
 
 /* Helper functions */
 static char* read_pipe_output(void) {
-    char* buffer = malloc(8192);
+    // Allocate a generous buffer
+    char* buffer = malloc(BUFFER_SIZE);
     if (!buffer) return NULL;
     
-    memset(buffer, 0, 8192);
+    memset(buffer, 0, BUFFER_SIZE);
     
-    // Read from pipe read end
-    ssize_t bytes_read = read(pipe_fds[0], buffer, 8191);
+    // Use your robust I/O function
+    ssize_t bytes_read = rio_unbuffered_read(pipe_fds[0], buffer, BUFFER_SIZE - 1);
+    
     if (bytes_read < 0) {
+        // Error occurred
         free(buffer);
         return NULL;
     }
     
+    // Ensure null termination
     buffer[bytes_read] = '\0';
     return buffer;
 }
@@ -71,7 +77,7 @@ START_TEST(test_initialize_response_sets_defaults)
     ck_assert_str_eq(test_response.server, "TuringBolt/0.1");
     ck_assert_ptr_nonnull(test_response.date);
     ck_assert_ptr_null(test_response.content_type);
-    ck_assert_int_eq(test_response.content_length, 0);
+    ck_assert_uint_eq(test_response.content_length, 0);
     ck_assert_ptr_null(test_response.content_encoding);
     ck_assert_ptr_null(test_response.last_modified);
     ck_assert_str_eq(test_response.connection, "close");
@@ -226,13 +232,19 @@ END_TEST
 /* Test cases for set_content_headers */
 START_TEST(test_set_content_headers)
 {
-    // This test requires a real file since it calls fstat
-    
     // Setup
-    char file_path[] = "./public/static/text/readme.txt";
+    char file_path[PATH_MAX];
+    snprintf(file_path, PATH_MAX, "%s/static/text/readme.txt", config.document_root);
+    
     int fd = open(file_path, O_RDONLY);
     if (fd < 0) {
         ck_abort_msg("Test file not found: %s", file_path);
+    }
+    
+    // Get actual file stats for precise verification
+    struct stat file_stat;
+    if (fstat(fd, &file_stat) < 0) {
+        ck_abort_msg("Failed to get file stats: %s", strerror(errno));
     }
     
     request.mime_type = TEXT_PLAIN;
@@ -244,7 +256,9 @@ START_TEST(test_set_content_headers)
     ck_assert_int_eq(result, 0);
     ck_assert_str_eq(response.content_type, "text/plain");
     ck_assert_ptr_nonnull(response.last_modified);
-    ck_assert(response.content_length > 0);
+    
+    // Exact content length verification
+    ck_assert_uint_eq(response.content_length, (size_t)file_stat.st_size);
     
     // Cleanup
     close(fd);
@@ -351,7 +365,7 @@ START_TEST(test_serve_static_special_chars_in_filename)
     ck_assert(strstr(output, "HTTP/1.1 200 OK") != NULL);
     
     // Should contain file content
-    ck_assert(strstr(output, "Special filename") != NULL);
+    ck_assert(strstr(output, "Special filename with spaces and symbols for testing.") != NULL);
     
     // Cleanup
     free(output);
