@@ -278,9 +278,74 @@ int serve_static(http_request *request, http_response * response, int client_fd,
     return 0;
 }
 
-/* int serve_dynamic(http_request *request, int client_fd, server_config *config) {
-    return 0;
-} */
+int serve_dynamic(http_request *request, http_response * response, int client_fd, server_config *config) {
+    char * abs_file_path = get_absolute_path(request, config);
+    if(!abs_file_path) {
+        response->status_code = 414;
+        response->reason = "URI Too Long";
+        return -1;
+    }
+    int fd = open(abs_file_path, O_RDONLY);
+    if (fd < 0) {
+        switch (errno) {
+            case ENOENT:
+                // File not found
+                response->status_code = 404;
+                response->reason = "Not Found";
+                break;
+            case EACCES:
+                // Permission denied
+                response->status_code = 403;
+                response->reason = "Forbidden";
+                break;
+            case EMFILE:
+            case ENFILE:
+                // Too many open files
+                response->status_code = 503;
+                response->reason = "Service Unavailable";
+                break;
+            default:
+                // Any other error
+                response->status_code = 500;
+                response->reason = "Internal Server Error";
+                LOG_ERROR("Failed to open file %s: %s", abs_file_path, strerror(errno));
+                break;
+        }
+        free(abs_file_path);
+        return -1;
+    }
+    set_content_headers(fd, request, response, abs_file_path);
+    free(abs_file_path);
+
+    response->status_code = 200;
+    response->reason = "OK";
+
+    
+    char * response_header = generate_response_header(response);
+
+    if(!response_header) {
+        LOG_ERROR("Error in generating response header");
+        response->status_code = 500;
+        response->reason = "Internal Server Error";
+        close(fd);
+        return -1;
+    }
+
+    // Commit to the response header even if the read/write from/to file/socket fail.
+
+    if(rio_unbuffered_write(client_fd, response_header, strlen(response_header)) == -1) {
+        response->status_code = 500;
+        response->reason = "Internal Server Error";
+        free(response_header);
+        return -1;
+    }
+    free(response_header);
+
+    pid_t pid = fork();
+    if(pid == 0) { // child process
+        ;
+    }
+} 
 
 
 char* generate_response_header(http_response* response) {

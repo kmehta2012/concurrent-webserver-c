@@ -114,7 +114,7 @@ int serve_static(http_request *request, http_response * response, int client_fd,
  * Returns:
  *    0 on success, -1 on error
  */
-/* int serve_dynamic(http_request *request, int client_fd, server_config *config); */
+int serve_dynamic(http_request *request, http_response * response, int client_fd, server_config *config);
 
 /**
  * Returns response header for client (including response line). Follows the following order for the headers. returned pointer must be free'd by the caller
