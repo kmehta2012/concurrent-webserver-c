@@ -18,6 +18,9 @@
 
 // Each header field also needs 2 bytes for CRLF
 #define CRLF_LEN                    2   // "\r\n"
+#define STATUS_CODE_LEN             3   // all http response codes are of length 3
+#define RESPONSE_STATUS_SIZE        128 // Upper bound on the http resposne line - Version Code Message
+#define MAX_HEADER_SIZE             8192 // max size of a single http response header
 
 // Structure to hold HTTP response details
 typedef struct {
@@ -150,7 +153,7 @@ char * generate_response_header(http_response * response);
  */
 char * get_absolute_path(http_request * request, server_config * config);
 
-
+int get_code_from_cgi_status(char * status_line);
 
 void initialize_response(http_response * response);
 

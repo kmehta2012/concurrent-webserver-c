@@ -9,8 +9,10 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <stdbool.h>
 
 
+extern char **environ;  // Declaration of the global environ variable
 
 void initialize_response(http_response *response) {
     if (!response) {
@@ -135,6 +137,65 @@ static char* mime_type_to_string(MIME_TYPE mime_type) {
     }
 }
 
+int get_code_from_cgi_status(char * status_line) {
+    int response_code;
+    if(sscanf(status_line, "Status: %d",  &response_code) == 1) {
+        return response_code;
+    }
+    return 500; // default fallback.
+}
+
+
+int write_cgi_headers(int client_fd, char * cgi_headers) {
+    char * status_header = strstr(cgi_headers, "Status: ");
+    if(status_header) return -1; // malformed CGI response headers. This means that we're positing cgi_headers to be null terminated. 
+    int response_code = get_code_from_cgi_status(status_header);
+    const char * response_message = get_reason_phrase(response_code);
+    char status_line[RESPONSE_STATUS_SIZE];
+    snprintf(status_line, RESPONSE_STATUS_SIZE, "HTTP/1.1 %d %s\r\n", response_code, response_message);
+    
+    if (rio_unbuffered_write(client_fd, status_line, strlen(status_line)) == -1) {
+        LOG_ERROR("Failed to write status line to client");
+        return -1;
+    }
+
+    char * header = strtok(cgi_headers, "\n"); // \n is more reliable than \r\n
+    char header_to_write[MAX_HEADER_SIZE];
+    while(header) {
+        if(strncmp(header, "Status:", 7)) {
+            int curr_header_size = strlen(header);
+            
+            if(curr_header_size + 1 > MAX_HEADER_SIZE) {
+                LOG_ERROR("Failed to write header to client. Error: Response header larger than max limit %d bytes", MAX_HEADER_SIZE);
+                return -1;
+            }
+
+            memcpy(header_to_write, header, curr_header_size);
+            header_to_write[curr_header_size] = "\n";
+            
+            if(rio_unbuffered_write(client_fd, header_to_write, curr_header_size + 1) == -1) {
+                LOG_ERROR("Failed to write header to client. Error: %s", strerror(errno));
+                return -1;
+            }
+        }
+
+        header = strtok(NULL, "\n");
+    }
+    return 0;
+}
+const char *get_reason_phrase(int code) {
+    switch (code) {
+        case 200: return "OK";
+        case 301: return "Moved Permanently";
+        case 400: return "Bad Request";
+        case 403: return "Forbidden";
+        case 404: return "Not Found";
+        case 501: return "Not Implemented";
+        case 505: return "HTTP Version Not Supported";
+        case 500: return "Internal Server Error";
+        default:  return "Unknown Status Code";
+    }
+}
 
 int set_content_headers(int fd, http_request *request, http_response *response, const char *file_path) {
     if (!response || fd < 0 || !request) {
@@ -199,7 +260,12 @@ int execute_request(http_request *request, int client_fd, server_config *config)
 }
 
 int serve_static(http_request *request, http_response * response, int client_fd, server_config *config) {
-
+    if (!request || !response || !config || client_fd < 0) {
+        LOG_ERROR("Invalid parameters passed to serve_dynamic");
+        response->status_code = 500;
+        response->reason = "Internal Server Error";
+        return -1;
+    }
     char * abs_file_path = get_absolute_path(request, config);
     if(!abs_file_path) {
         response->status_code = 414;
@@ -279,6 +345,18 @@ int serve_static(http_request *request, http_response * response, int client_fd,
 }
 
 int serve_dynamic(http_request *request, http_response * response, int client_fd, server_config *config) {
+    /*
+    Issues to think about - 
+    1. If the CGI file writes to the write end of the pipe more than the pipes size at once, would 
+    we not have a deadlock? Because the write end will block? When am i reading from the pipe exactly?
+    */
+        
+    if (!request || !response || !config || client_fd < 0) {
+        LOG_ERROR("Invalid parameters passed to serve_dynamic");
+        response->status_code = 500;
+        response->reason = "Internal Server Error";
+        return -1;
+    }
     char * abs_file_path = get_absolute_path(request, config);
     if(!abs_file_path) {
         response->status_code = 414;
@@ -314,38 +392,143 @@ int serve_dynamic(http_request *request, http_response * response, int client_fd
         free(abs_file_path);
         return -1;
     }
-    set_content_headers(fd, request, response, abs_file_path);
-    free(abs_file_path);
+    if (access(abs_file_path, X_OK) != 0) {
+        LOG_ERROR("CGI script not executable: %s", abs_file_path);
+        response->status_code = 403;
+        response->reason = "Forbidden";
+        free(abs_file_path);
+        return -1;
+    }
 
-    response->status_code = 200;
-    response->reason = "OK";
-
+    // Create pipes for communication with CGI script
+    int pipe_to_child[2];   // Server writes to child (for POST data later)
+    int pipe_from_child[2]; // Child writes to server (CGI output)
     
-    char * response_header = generate_response_header(response);
-
-    if(!response_header) {
-        LOG_ERROR("Error in generating response header");
+    if (pipe(pipe_to_child) < 0 || pipe(pipe_from_child) < 0) {
+        LOG_ERROR("Failed to create pipes for CGI communication: %s", strerror(errno));
         response->status_code = 500;
         response->reason = "Internal Server Error";
-        close(fd);
+        free(abs_file_path);
         return -1;
     }
 
-    // Commit to the response header even if the read/write from/to file/socket fail.
-
-    if(rio_unbuffered_write(client_fd, response_header, strlen(response_header)) == -1) {
-        response->status_code = 500;
-        response->reason = "Internal Server Error";
-        free(response_header);
-        return -1;
-    }
-    free(response_header);
+    LOG_INFO("Executing CGI script: %s", abs_file_path);
 
     pid_t pid = fork();
-    if(pid == 0) { // child process
-        ;
+    if(pid < 0) {
+        LOG_ERROR("Failed to fork for CGI execution : %s", strerror(errno));
+        response->reason = "Internal Server Error";
+        close(pipe_to_child[0]);
+        close(pipe_to_child[1]);
+        close(pipe_from_child[0]);
+        close(pipe_from_child[1]);
+        free(abs_file_path);
+        return -1;
+    } else if(pid == 0) { //in child
+        setenv("REQUEST_METHOD", "GET", 1);
+        setenv("SERVER_PORT", config->port, 1);
+        //setenv("SERVER_NAME", config->server_name,1);
+        setenv("SCRIPT_NAME", request->path, 1);
+        setenv("SERVER_SOFTWARE", config->server_name, 1);
+        setenv("GATEWAY_INTERFACE", "CGI/1.1", 1);
+        setenv("CONTENT_TYPE", "", 1);         // Empty for GET
+        setenv("CONTENT_LENGTH", "0", 1);      // 0 for GET
+
+    
+        // Redirect stdin and stdout for CGI communication
+        dup2(pipe_to_child[0], STDIN_FILENO);     // Child reads from server
+        dup2(pipe_from_child[1], STDOUT_FILENO);  // Child writes to server
+        dup2(pipe_from_child[1], STDERR_FILENO);  // Redirect stderr to same pipe
+
+        // Close all pipe ends in child
+        close(pipe_to_child[0]);
+        close(pipe_to_child[1]);
+        close(pipe_from_child[0]);
+        close(pipe_from_child[1]);
+
+        // Execute the CGI script
+        char *argv[] = {abs_file_path, NULL};
+        execve(abs_file_path, argv, environ);
+        
+        LOG_ERROR("Failed to execute request dynamic file %s : %s", abs_file_path, strerror(errno));
+        exit(1);
+    } else { 
+        close(pipe_to_child[0]);
+        close(pipe_to_child[1]);
+        
+        char read_buffer[BUFFER_SIZE], cgi_header_buffer[BUFFER_SIZE];
+        ssize_t bytes_read = 0;
+        ssize_t total_bytes_written = 0;
+        char * header_end = NULL;
+        bool headers_completed = false;
+        bool headers_written = false;
+        ssize_t cgi_output_start = 0;
+        
+        while((bytes_read = read(pipe_from_child[0], read_buffer, BUFFER_SIZE - 1)) != 0) {
+            if(!header_end) {
+                /*
+                1. We've not reached the end of cgi headers yet. 
+                2. See if read_buffer contains the CRLF pair or \n\n, marking the end of CGI headers
+                3. If it does not -
+                     memcpy(cgi_header_buffer + total_bytes_read, read_buffer, bytes_read); 
+                     total_bytes_read += bytes_read;
+                4. If it does, calculate the number of bytes to write as follows:
+                    - if crlf is \r\n\r\n then bytes to write = header_end - read_buffer. Exlcuding tge CLRF pair
+                    - similar for \n\n
+                    - 
+                5. After writing the last header. Make sure to NULL terminate. 
+                */
+                read_buffer[bytes_read] = "\0"; // doing this for strstr
+                header_end = strstr(read_buffer, "\r\n\r\n");
+            }
+            if(!header_end) header_end = strstr(read_buffer,"\n\n");
+        
+            if(!header_end) { // read_buffer does not have all headers yet
+                    if(total_bytes_written + bytes_read > BUFFER_SIZE - 1) {
+                        LOG_ERROR("Failed to write CGI headers. Error : CGI headers exceed %d bytes",BUFFER_SIZE - 1);
+                        return -1;
+                    }
+                    memcpy(cgi_header_buffer + total_bytes_written, read_buffer, bytes_read); 
+                    total_bytes_written += bytes_read;
+            } else { // We're at the end of CGI headers
+                ssize_t bytes_to_write = header_end - read_buffer;
+                if(total_bytes_written + bytes_to_write > BUFFER_SIZE - 1) {
+                    LOG_ERROR("Failed to write CGI headers. Error : CGI headers exceed %d bytes",BUFFER_SIZE - 1);
+                    return -1;
+                }
+                memcpy(cgi_header_buffer + total_bytes_written, read_buffer, bytes_to_write);
+                total_bytes_written += bytes_to_write;
+                headers_completed = true;
+            }
+    
+            if(headers_completed && !headers_written){
+                cgi_header_buffer[total_bytes_written] = "\0";
+                if(write_cgi_headers(client_fd, cgi_header_buffer) == -1) {
+                    response->reason = "Internal Server Error";
+                    response->status_code = 500;
+                    return -1;
+                }
+                headers_written = true;
+                if(header_end[0] == "\r") {
+                    cgi_output_start = (header_end - read_buffer) +  4;
+                } else {
+                    cgi_output_start = (header_end - read_buffer) + 2; 
+                }
+                if(rio_unbuffered_write(client_fd, read_buffer + cgi_output_start, bytes_read - cgi_output_start) == -1) {
+                    LOG_ERROR("Failed to write CGI output");
+                    return -1;
+                } 
+                continue;
+            }
+            
+            if(rio_unbuffered_write(client_fd, read_buffer + cgi_output_start, bytes_read - cgi_output_start) == -1) {
+                LOG_ERROR("Failed to write CGI output");
+                return -1;
+            } 
+        }
     }
-} 
+    return 0;
+}
 
 
 char* generate_response_header(http_response* response) {
@@ -362,9 +545,8 @@ char* generate_response_header(http_response* response) {
     header_size += 20;
     
     // Add space for content-type
-    if (response->content_type) {
+    if (response->content_type) 
         header_size += strlen(response->content_type) + 16; // "Content-Type: " + content
-    }
     
     // Add space for other headers if they exist
     if (response->date) 
