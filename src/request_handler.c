@@ -380,16 +380,22 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
         // Set QUERY_STRING if we have parameters
         if (request->param_count > 0) {
             char query_string[BUFFER_SIZE] = "";
+            size_t offset = 0;
             for (int i = 0; i < request->param_count; i++) {
-                if (i > 0) strcat(query_string, "&");
-                strcat(query_string, request->param_names[i]);
-                strcat(query_string, "=");
-                strcat(query_string, request->param_values[i]);
+                int written = snprintf(query_string + offset, BUFFER_SIZE - offset, 
+                                    "%s%s=%s", 
+                                    i > 0 ? "&" : "", 
+                                    request->param_names[i], 
+                                    request->param_values[i]);
+                if (written < 0 || offset + written >= BUFFER_SIZE) {
+                    // Exit with specific code for query string too long
+                    exit(EXIT_QUERY_TOO_LONG);  
+                }
+                offset += written;
             }
             setenv("QUERY_STRING", query_string, 1);
-        } else {
-            setenv("QUERY_STRING", "", 1);
-        }
+        } else setenv("QUERY_STRING", "", 1);
+        
 
         // Redirect stdin and stdout for CGI communication
         dup2(pipe_to_child[0], STDIN_FILENO);     // Child reads from server
@@ -437,8 +443,22 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
         char read_buffer[BUFFER_SIZE];
         ssize_t bytes_read;
 
-        // Read all output from CGI script
-        while ((bytes_read = read(pipe_from_child[0], read_buffer, BUFFER_SIZE)) > 0) {
+        while ((bytes_read = read(pipe_from_child[0], read_buffer, BUFFER_SIZE)) != 0) {
+            if (bytes_read < 0) {
+                if (errno == EINTR) continue;  // Just retry the read
+                
+                // Real error
+                LOG_ERROR("Failed to read from CGI output: %s", strerror(errno));
+                free(cgi_output);
+                response->status_code = 500;
+                response->reason = "Internal Server Error";
+                close(pipe_from_child[0]);
+                kill(pid, SIGTERM);
+                waitpid(pid, NULL, 0);
+                return -1;
+            }
+            
+            // Normal processing for bytes_read > 0
             // Resize buffer if needed
             if (total_output + bytes_read >= output_capacity) {
                 output_capacity *= 2;
@@ -468,8 +488,22 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
             LOG_ERROR("Failed to wait for CGI process: %s", strerror(errno));
         }
 
-        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        if(!WIFEXITED(status)) {
             LOG_ERROR("CGI script failed with status: %d", WEXITSTATUS(status));
+            response->status_code = 500;
+            response->reason = "Internal Server Error";
+            free(cgi_output);
+            return -1;            
+        }
+        int exit_code = WEXITSTATUS(status);
+        if (exit_code == EXIT_QUERY_TOO_LONG) {
+            LOG_ERROR("CGI script failed: Query string too long");
+            response->status_code = 414;  // URI Too Long
+            response->reason = "URI Too Long";
+            free(cgi_output);
+            return -1;
+        } else if (exit_code != 0) {
+            LOG_ERROR("CGI script failed with exit code: %d", exit_code);
             response->status_code = 500;
             response->reason = "Internal Server Error";
             free(cgi_output);

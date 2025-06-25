@@ -22,6 +22,8 @@
 #define RESPONSE_STATUS_SIZE        128 // Upper bound on the http resposne line - Version Code Message
 #define MAX_HEADER_SIZE             8192 // max size of a single http response header
 
+// specific EXIT codes for child process
+#define EXIT_QUERY_TOO_LONG 2
 // Structure to hold HTTP response details
 typedef struct {
     // Status information
