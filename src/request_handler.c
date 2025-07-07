@@ -213,10 +213,15 @@ int execute_request(http_request *request, int client_fd, server_config *config)
             }
             free(response_header);
         }
+        else {
+            // Could not generate response header - this is the only real failure
+            destroy_response(&response);
+            return -1;
+        }
     }
     
     destroy_response(&response);
-    return 0; 
+    return 0;
 }
 
 int serve_static(http_request *request, http_response * response, int client_fd, server_config *config) {
