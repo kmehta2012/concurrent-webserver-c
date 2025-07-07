@@ -790,6 +790,7 @@ char* generate_response_header(http_response* response) {
 
 void destroy_response(http_response * response) {
     free(response->date);
+    free(response->last_modified);
     for(int i = 0; i < response->extra_header_count; ++i) {
         free(response->extra_header_names[i]);
         free(response->extra_header_values[i]);
