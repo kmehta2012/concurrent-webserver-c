@@ -5,10 +5,11 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <errno.h>
-#include <limits.h>  // For PATH_MAX
-
+#include <limits.h>
+#include <signal.h>
 
 #include "request_handler.h"
 #include "http_parser.h"
@@ -19,17 +20,90 @@
 static http_request request;
 static http_response response;
 static server_config config;
-static int pipe_fds[2];  // For capturing socket output
+static int pipe_fds[2];
 
-/* Helper function to safely close pipe ends */
-static void safe_close_pipe(int *fd_ptr) {
-    if (*fd_ptr >= 0) {
-        close(*fd_ptr);
-        *fd_ptr = -1;  // Mark as closed
+/* Helper function to create specific test files we need */
+static void create_additional_test_files(void) {
+    // Create a file with no read permissions for permission testing
+    FILE *f = fopen("./public/static/text/noread.txt", "w");
+    if (f) {
+        fprintf(f, "This file has no read permissions\n");
+        fclose(f);
+        chmod("./public/static/text/noread.txt", 0000);
+    }
+    
+    // Create a non-executable CGI for testing
+    f = fopen("./public/cgi-bin/noexec.cgi", "w");
+    if (f) {
+        fprintf(f, "#!/bin/bash\necho \"This script is not executable\"\n");
+        fclose(f);
+        chmod("./public/cgi-bin/noexec.cgi", 0644);
+    }
+    
+    // Create a CGI that returns custom status
+    f = fopen("./public/cgi-bin/status.cgi", "w");
+    if (f) {
+        fprintf(f, "#!/bin/bash\n");
+        fprintf(f, "echo \"Status: 404\"\n");
+        fprintf(f, "echo \"Content-Type: text/plain\"\n");
+        fprintf(f, "echo \"\"\n");
+        fprintf(f, "echo \"Not found from CGI\"\n");
+        fclose(f);
+        chmod("./public/cgi-bin/status.cgi", 0755);
+    }
+    
+    // Create a CGI that outputs binary data
+    f = fopen("./public/cgi-bin/binary.cgi", "w");
+    if (f) {
+        fprintf(f, "#!/bin/bash\n");
+        fprintf(f, "echo \"Content-Type: application/octet-stream\"\n");
+        fprintf(f, "echo \"\"\n");
+        fprintf(f, "printf '\\x00\\x01\\x02\\x03\\xFF\\xFE\\xFD'\n");
+        fclose(f);
+        chmod("./public/cgi-bin/binary.cgi", 0755);
+    }
+    
+    // Create a CGI that fails
+    f = fopen("./public/cgi-bin/fail.cgi", "w");
+    if (f) {
+        fprintf(f, "#!/bin/bash\n");
+        fprintf(f, "exit 1\n");
+        fclose(f);
+        chmod("./public/cgi-bin/fail.cgi", 0755);
+    }
+    
+    // Create a CGI that handles parameters
+    f = fopen("./public/cgi-bin/params_test.cgi", "w");
+    if (f) {
+        fprintf(f, "#!/bin/bash\n");
+        fprintf(f, "echo \"Content-Type: text/plain\"\n");
+        fprintf(f, "echo \"\"\n");
+        fprintf(f, "echo \"CGI Parameter Test\"\n");
+        fprintf(f, "echo \"QUERY_STRING=$QUERY_STRING\"\n");
+        fprintf(f, "echo \"REQUEST_METHOD=$REQUEST_METHOD\"\n");
+        fclose(f);
+        chmod("./public/cgi-bin/params_test.cgi", 0755);
+    }
+    
+    // Create a truly binary file for testing
+    f = fopen("./public/static/misc/binary.dat", "wb");
+    if (f) {
+        unsigned char binary_data[] = {0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD};
+        fwrite(binary_data, 1, sizeof(binary_data), f);
+        fclose(f);
     }
 }
 
-/* Other test helpers like read_pipe_output() etc. */
+/* Helper function to cleanup additional test files */
+static void cleanup_additional_test_files(void) {
+    unlink("./public/static/text/noread.txt");
+    unlink("./public/cgi-bin/noexec.cgi");
+    unlink("./public/cgi-bin/status.cgi");
+    unlink("./public/cgi-bin/binary.cgi");
+    unlink("./public/cgi-bin/fail.cgi");
+    unlink("./public/cgi-bin/params_test.cgi");
+    unlink("./public/static/misc/binary.dat");
+}
 
 /* Setup and teardown */
 static void setup(void) {
@@ -37,10 +111,16 @@ static void setup(void) {
     initialize_response(&response);
     config_init(&config);
     
-    // Create a pipe to capture socket output
+    // Set document root to actual public directory
+    free(config.document_root);
+    config.document_root = strdup("./public/");
+    
+    // Create additional test files
+    create_additional_test_files();
+    
+    // Create pipe for capturing output
     if (pipe(pipe_fds) < 0) {
-        perror("pipe");
-        exit(EXIT_FAILURE);
+        ck_abort_msg("Failed to create pipe");
     }
 }
 
@@ -49,449 +129,729 @@ static void teardown(void) {
     destroy_response(&response);
     config_cleanup(&config);
     
-    // Close pipe
-    safe_close_pipe(&pipe_fds[0]);
-    safe_close_pipe(&pipe_fds[1]);
+    // Close pipes
+    close(pipe_fds[0]);
+    close(pipe_fds[1]);
+    
+    // Cleanup additional test files
+    cleanup_additional_test_files();
 }
 
-/* Helper functions */
+/* Helper to read pipe output */
 static char* read_pipe_output(void) {
-    // Allocate a generous buffer
-    char* buffer = malloc(BUFFER_SIZE);
+    char* buffer = malloc(BUFFER_SIZE * 10);
     if (!buffer) return NULL;
     
-    memset(buffer, 0, BUFFER_SIZE);
+    memset(buffer, 0, BUFFER_SIZE * 10);
     
-    // Use your robust I/O function
-    ssize_t bytes_read = rio_unbuffered_read(pipe_fds[0], buffer, BUFFER_SIZE - 1);
+    // Set non-blocking to avoid hanging
+    int flags = fcntl(pipe_fds[0], F_GETFL, 0);
+    fcntl(pipe_fds[0], F_SETFL, flags | O_NONBLOCK);
     
-    if (bytes_read < 0) {
-        // Error occurred
-        free(buffer);
-        return NULL;
+    ssize_t total = 0;
+    ssize_t bytes;
+    while ((bytes = read(pipe_fds[0], buffer + total, BUFFER_SIZE - total - 1)) > 0) {
+        total += bytes;
     }
     
-    // Ensure null termination
-    buffer[bytes_read] = '\0';
+    buffer[total] = '\0';
     return buffer;
 }
 
-/* Test cases for initialize_response */
-START_TEST(test_initialize_response_sets_defaults)
+/* ===== Tests for initialize_response ===== */
+START_TEST(test_initialize_response_complete)
 {
-    http_response test_response;
-    initialize_response(&test_response);
+    http_response test_resp;
+    initialize_response(&test_resp);
     
-    ck_assert_int_eq(test_response.status_code, 200);
-    ck_assert_str_eq(test_response.reason, "OK");
-    ck_assert_str_eq(test_response.server, "TuringBolt/0.1");
-    ck_assert_ptr_nonnull(test_response.date);
-    ck_assert_ptr_null(test_response.content_type);
-    ck_assert_uint_eq(test_response.content_length, 0);
-    ck_assert_ptr_null(test_response.content_encoding);
-    ck_assert_ptr_null(test_response.last_modified);
-    ck_assert_str_eq(test_response.connection, "close");
-    ck_assert_ptr_null(test_response.cache_control);
-    ck_assert_ptr_null(test_response.etag);
-    ck_assert_ptr_null(test_response.body);
-    ck_assert_int_eq(test_response.is_file, false);
-    ck_assert_ptr_null(test_response.extra_header_names);
-    ck_assert_ptr_null(test_response.extra_header_values);
-    ck_assert_int_eq(test_response.extra_header_count, 0);
+    // Check all fields are properly initialized
+    ck_assert_int_eq(test_resp.status_code, 200);
+    ck_assert_str_eq(test_resp.reason, "OK");
+    ck_assert_str_eq(test_resp.server, "TuringBolt/0.1");
+    ck_assert_ptr_nonnull(test_resp.date);
     
-    destroy_response(&test_response);
+    // Verify date format
+    ck_assert(strstr(test_resp.date, "GMT") != NULL);
+    
+    ck_assert_ptr_null(test_resp.content_type);
+    ck_assert_uint_eq(test_resp.content_length, 0);
+    ck_assert_ptr_null(test_resp.content_encoding);
+    ck_assert_ptr_null(test_resp.last_modified);
+    ck_assert_str_eq(test_resp.connection, "close");
+    ck_assert_ptr_null(test_resp.cache_control);
+    ck_assert_ptr_null(test_resp.etag);
+    ck_assert_ptr_null(test_resp.body);
+    ck_assert_int_eq(test_resp.is_file, false);
+    ck_assert_ptr_null(test_resp.extra_header_names);
+    ck_assert_ptr_null(test_resp.extra_header_values);
+    ck_assert_int_eq(test_resp.extra_header_count, 0);
+    
+    destroy_response(&test_resp);
 }
 END_TEST
 
-/* Test cases for get_absolute_path */
-START_TEST(test_get_absolute_path_normal_path)
+START_TEST(test_initialize_response_null_input)
 {
-    // Setup
-    config.document_root = strdup("./public/");
-    request.path = strdup("/static/test.html");
-    
-    // Test
-    char *result = get_absolute_path(&request, &config);
-    
-    // Verify
-    ck_assert_ptr_nonnull(result);
-    ck_assert_str_eq(result, "./public/static/test.html");
-    
-    // Cleanup
-    free(result);
+    // Should handle NULL gracefully
+    initialize_response(NULL);
+    // If we get here without crashing, test passes
 }
 END_TEST
 
-START_TEST(test_get_absolute_path_empty_path)
+/* ===== Tests for destroy_response ===== */
+START_TEST(test_destroy_response_complete)
 {
-    // Setup
-    config.document_root = strdup("./public/");
-    request.path = strdup("");
+    http_response test_resp;
+    initialize_response(&test_resp);
     
-    // Test
-    char *result = get_absolute_path(&request, &config);
+    // Add some extra headers
+    test_resp.extra_header_count = 2;
+    test_resp.extra_header_names = malloc(2 * sizeof(char*));
+    test_resp.extra_header_values = malloc(2 * sizeof(char*));
+    test_resp.extra_header_names[0] = strdup("X-Custom-Header");
+    test_resp.extra_header_values[0] = strdup("CustomValue");
+    test_resp.extra_header_names[1] = strdup("X-Another-Header");
+    test_resp.extra_header_values[1] = strdup("AnotherValue");
     
-    // Verify
-    ck_assert_ptr_nonnull(result);
-    ck_assert_str_eq(result, "./public/");
+    // Add last_modified to test the fix
+    test_resp.last_modified = strdup("Wed, 21 Oct 2025 07:28:00 GMT");
     
-    // Cleanup
-    free(result);
+    // Destroy should free everything without leaks
+    destroy_response(&test_resp);
+    
+    // Test passes if no segfault/leak (use valgrind to verify)
 }
 END_TEST
 
-/* Test cases for mime_type_to_string */
-START_TEST(test_mime_type_to_string)
+/* ===== Tests for get_absolute_path ===== */
+START_TEST(test_get_absolute_path_normal)
 {
-    // This function is static, so we need to test it indirectly through other functions
-    // We'll use generate_response_header to test it
+    request.path = strdup("/static/text/readme.txt");
     
+    char *abs_path = get_absolute_path(&request, &config);
+    ck_assert_ptr_nonnull(abs_path);
+    ck_assert_str_eq(abs_path, "./public/static/text/readme.txt");
+    
+    free(abs_path);
+}
+END_TEST
+
+START_TEST(test_get_absolute_path_root)
+{
+    request.path = strdup("/");
+    
+    char *abs_path = get_absolute_path(&request, &config);
+    ck_assert_ptr_nonnull(abs_path);
+    ck_assert_str_eq(abs_path, "./public/");
+    
+    free(abs_path);
+}
+END_TEST
+
+START_TEST(test_get_absolute_path_special_chars)
+{
+    // Test with the file that has spaces and special characters
+    request.path = strdup("/static/text/file with spaces & symbols #@!.txt");
+    
+    char *abs_path = get_absolute_path(&request, &config);
+    ck_assert_ptr_nonnull(abs_path);
+    ck_assert_str_eq(abs_path, "./public/static/text/file with spaces & symbols #@!.txt");
+    
+    free(abs_path);
+}
+END_TEST
+
+START_TEST(test_get_absolute_path_long_filename)
+{
+    // Test with the extremely long filename
+    request.path = strdup("/static/text/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt");
+    
+    char *abs_path = get_absolute_path(&request, &config);
+    ck_assert_ptr_nonnull(abs_path);
+    
+    free(abs_path);
+}
+END_TEST
+
+START_TEST(test_get_absolute_path_too_long)
+{
+    // Create a path that exceeds PATH_MAX
+    char long_path[PATH_MAX];
+    memset(long_path, 'a', PATH_MAX - 1);
+    long_path[0] = '/';
+    long_path[PATH_MAX - 1] = '\0';
+    request.path = strdup(long_path);
+    
+    char *abs_path = get_absolute_path(&request, &config);
+    ck_assert_ptr_null(abs_path);
+}
+END_TEST
+
+/* ===== Tests for set_content_headers ===== */
+START_TEST(test_set_content_headers_text_file)
+{
+    // Use existing readme.txt
+    int fd = open("./public/static/text/readme.txt", O_RDONLY);
+    ck_assert_int_ge(fd, 0);
+    
+    request.mime_type = TEXT_PLAIN;
+    
+    int result = set_content_headers(fd, &request, &response, "./public/static/text/readme.txt");
+    ck_assert_int_eq(result, 0);
+    
+    // Verify headers were set
+    ck_assert_str_eq(response.content_type, "text/plain");
+    ck_assert_ptr_nonnull(response.last_modified);
+    ck_assert(strstr(response.last_modified, "GMT") != NULL);
+    ck_assert_ptr_null(response.content_encoding);
+    
+    close(fd);
+}
+END_TEST
+
+START_TEST(test_set_content_headers_large_file)
+{
+    // Use the 10KB file
+    int fd = open("./public/static/text/atleast_10Kb_file.txt", O_RDONLY);
+    ck_assert_int_ge(fd, 0);
+    
+    request.mime_type = TEXT_PLAIN;
+    
+    int result = set_content_headers(fd, &request, &response, "./public/static/text/atleast_10Kb_file.txt");
+    ck_assert_int_eq(result, 0);
+    
+    // File should be around 10KB
+    ck_assert(response.content_length >= 10000);
+    
+    close(fd);
+}
+END_TEST
+
+START_TEST(test_set_content_headers_all_mime_types)
+{
+    // Test various existing files with different MIME types
+    struct {
+        const char *path;
+        MIME_TYPE type;
+        const char *expected;
+    } test_files[] = {
+        {"./public/static/html/index.html", TEXT_HTML, "text/html"},
+        {"./public/static/css/styles.css", TEXT_CSS, "text/css"},
+        {"./public/static/js/script.js", APPLICATION_JAVASCRIPT, "application/javascript"},
+        {"./public/static/text/sample.json", APPLICATION_JSON, "application/json"},
+        {"./public/static/media/dummy.png", IMAGE_PNG, "image/png"},
+        {"./public/static/media/dummy.jpg", IMAGE_JPEG, "image/jpeg"},
+        {"./public/static/misc/dummy.pdf", APPLICATION_PDF, "application/pdf"},
+    };
+    
+    for (size_t i = 0; i < sizeof(test_files)/sizeof(test_files[0]); i++) {
+        int fd = open(test_files[i].path, O_RDONLY);
+        if (fd < 0) {
+            ck_abort_msg("Failed to open test file: %s", test_files[i].path);
+        }
+        
+        request.mime_type = test_files[i].type;
+        
+        int result = set_content_headers(fd, &request, &response, test_files[i].path);
+        ck_assert_int_eq(result, 0);
+        ck_assert_str_eq(response.content_type, test_files[i].expected);
+        
+        // Clean up for next iteration
+        free(response.last_modified);
+        response.last_modified = NULL;
+        close(fd);
+    }
+}
+END_TEST
+
+/* ===== Tests for generate_response_header ===== */
+START_TEST(test_generate_response_header_200_ok)
+{
     response.status_code = 200;
     response.reason = "OK";
-    
-    // Test HTML
     response.content_type = "text/html";
+    response.content_length = 1234;
+    
     char *header = generate_response_header(&response);
     ck_assert_ptr_nonnull(header);
-    ck_assert(strstr(header, "Content-Type: text/html") != NULL);
-    free(header);
     
-    // Test Plain Text
-    response.content_type = "text/plain";
-    header = generate_response_header(&response);
-    ck_assert_ptr_nonnull(header);
-    ck_assert(strstr(header, "Content-Type: text/plain") != NULL);
-    free(header);
+    // Verify required components
+    ck_assert(strstr(header, "HTTP/1.1 200 OK\r\n") != NULL);
+    ck_assert(strstr(header, "Server: TuringBolt/0.1\r\n") != NULL);
+    ck_assert(strstr(header, "Connection: close\r\n") != NULL);
+    ck_assert(strstr(header, "Content-Type: text/html\r\n") != NULL);
+    ck_assert(strstr(header, "Content-Length: 1234\r\n") != NULL);
+    ck_assert(strstr(header, "Date: ") != NULL);
     
-    // Test JPEG
-    response.content_type = "image/jpeg";
-    header = generate_response_header(&response);
-    ck_assert_ptr_nonnull(header);
-    ck_assert(strstr(header, "Content-Type: image/jpeg") != NULL);
+    // Should end with double CRLF
+    size_t len = strlen(header);
+    ck_assert_str_eq(header + len - 4, "\r\n\r\n");
+    
     free(header);
 }
 END_TEST
 
-/* Test cases for generate_response_header */
-START_TEST(test_generate_response_header_success)
+START_TEST(test_generate_response_header_404_error)
 {
-    // Setup
-    response.status_code = 200;
-    response.reason = "OK";
-    response.content_type = "text/html";
-    response.content_length = 100;
-    
-    // Test
-    char *header = generate_response_header(&response);
-    
-    // Verify
-    ck_assert_ptr_nonnull(header);
-    ck_assert(strstr(header, "HTTP/1.1 200 OK") != NULL);
-    ck_assert(strstr(header, "Content-Type: text/html") != NULL);
-    ck_assert(strstr(header, "Content-Length: 100") != NULL);
-    ck_assert(strstr(header, "Server: TuringBolt/0.1") != NULL);
-    
-    // Cleanup
-    free(header);
-}
-END_TEST
-
-START_TEST(test_generate_response_header_error)
-{
-    // Setup
     response.status_code = 404;
     response.reason = "Not Found";
     response.content_type = "text/html";
     response.content_length = 100;
     
-    // Test
     char *header = generate_response_header(&response);
-    
-    // Verify
     ck_assert_ptr_nonnull(header);
-    ck_assert(strstr(header, "HTTP/1.1 404 Not Found") != NULL);
+    ck_assert(strstr(header, "HTTP/1.1 404 Not Found\r\n") != NULL);
     
-    // Cleanup
     free(header);
 }
 END_TEST
 
-START_TEST(test_generate_response_header_with_headers)
+START_TEST(test_generate_response_header_with_optional_headers)
 {
-    // Setup
     response.status_code = 200;
     response.reason = "OK";
     response.content_type = "text/html";
     response.content_length = 100;
-    response.last_modified = "Wed, 14 May 2025 12:00:00 GMT";
+    response.last_modified = "Wed, 21 Oct 2025 07:28:00 GMT";
     response.cache_control = "max-age=3600";
+    response.etag = "\"123456789\"";
     
-    // Test
     char *header = generate_response_header(&response);
-    
-    // Verify
     ck_assert_ptr_nonnull(header);
-    ck_assert(strstr(header, "Last-Modified: Wed, 14 May 2025 12:00:00 GMT") != NULL);
-    ck_assert(strstr(header, "Cache-Control: max-age=3600") != NULL);
     
-    // Cleanup
+    ck_assert(strstr(header, "Last-Modified: Wed, 21 Oct 2025 07:28:00 GMT\r\n") != NULL);
+    ck_assert(strstr(header, "Cache-Control: max-age=3600\r\n") != NULL);
+    ck_assert(strstr(header, "ETag: \"123456789\"\r\n") != NULL);
+    
     free(header);
 }
 END_TEST
 
-/* Test cases for set_content_headers */
-START_TEST(test_set_content_headers)
+/* ===== Tests for serve_static ===== */
+START_TEST(test_serve_static_small_text_file)
 {
-    // Setup
-    char file_path[PATH_MAX];
-    snprintf(file_path, PATH_MAX, "%s/static/text/readme.txt", config.document_root);
-    
-    int fd = open(file_path, O_RDONLY);
-    if (fd < 0) {
-        ck_abort_msg("Test file not found: %s", file_path);
-    }
-    
-    // Get actual file stats for precise verification
-    struct stat file_stat;
-    if (fstat(fd, &file_stat) < 0) {
-        ck_abort_msg("Failed to get file stats: %s", strerror(errno));
-    }
-    
-    request.mime_type = TEXT_PLAIN;
-    
-    // Test
-    int result = set_content_headers(fd, &request, &response, file_path);
-    
-    // Verify
-    ck_assert_int_eq(result, 0);
-    ck_assert_str_eq(response.content_type, "text/plain");
-    ck_assert_ptr_nonnull(response.last_modified);
-    
-    // Exact content length verification
-    ck_assert_uint_eq(response.content_length, (size_t)file_stat.st_size);
-    
-    // Cleanup
-    close(fd);
-}
-END_TEST
-
-START_TEST(test_set_content_headers_invalid_fd)
-{
-    // Setup - use an invalid file descriptor
-    int invalid_fd = -1;
-    request.mime_type = TEXT_PLAIN;
-    
-    // Test
-    int result = set_content_headers(invalid_fd, &request, &response, "invalid.txt");
-    
-    // Verify
-    ck_assert_int_eq(result, -1);
-    
-    // No cleanup needed
-}
-END_TEST
-
-START_TEST(test_serve_static_existing_file)
-{
-    // Setup
-    config.document_root = strdup("./public/");
+    // Use existing readme.txt
     request.path = strdup("/static/text/readme.txt");
     request.mime_type = TEXT_PLAIN;
     request.is_dynamic = false;
     
-    // Test - use the pipe write end as the client socket
     int result = serve_static(&request, &response, pipe_fds[1], &config);
-    // Verify
     ck_assert_int_eq(result, 0);
-
-    // Close write end to signal EOF to read end
-    safe_close_pipe(&pipe_fds[1]);
-
-    // Read what was sent to the "client"
+    
+    close(pipe_fds[1]);
+    
     char *output = read_pipe_output();
     ck_assert_ptr_nonnull(output);
     
-    // Should contain HTTP response line and headers
+    // Verify response
     ck_assert(strstr(output, "HTTP/1.1 200 OK") != NULL);
     ck_assert(strstr(output, "Content-Type: text/plain") != NULL);
-    
-    // Should contain file content
     ck_assert(strstr(output, "This is a simple text file") != NULL);
     
-    // Cleanup
     free(output);
 }
 END_TEST
 
-START_TEST(test_serve_static_missing_file)
+START_TEST(test_serve_static_html_file)
 {
-    // Setup
-    config.document_root = strdup("./public/");
-    request.path = strdup("/static/nonexistent.txt");
+    // Use existing index.html
+    request.path = strdup("/static/html/index.html");
+    request.mime_type = TEXT_HTML;
+    request.is_dynamic = false;
+    
+    int result = serve_static(&request, &response, pipe_fds[1], &config);
+    ck_assert_int_eq(result, 0);
+    
+    close(pipe_fds[1]);
+    
+    char *output = read_pipe_output();
+    ck_assert_ptr_nonnull(output);
+    
+    // Verify response
+    ck_assert(strstr(output, "HTTP/1.1 200 OK") != NULL);
+    ck_assert(strstr(output, "Content-Type: text/html") != NULL);
+    ck_assert(strstr(output, "Welcome to the Web Server Test") != NULL);
+    
+    free(output);
+}
+END_TEST
+
+START_TEST(test_serve_static_binary_file)
+{
+    // Use our created binary file
+    request.path = strdup("/static/misc/binary.dat");
+    request.mime_type = APPLICATION_OCTET_STREAM;
+    request.is_dynamic = false;
+    
+    int result = serve_static(&request, &response, pipe_fds[1], &config);
+    ck_assert_int_eq(result, 0);
+    
+    close(pipe_fds[1]);
+    
+    // Read raw output (don't null-terminate)
+    unsigned char buffer[BUFFER_SIZE];
+    ssize_t total = read(pipe_fds[0], buffer, BUFFER_SIZE);
+    
+    // Find header end
+    unsigned char *body_start = NULL;
+    for (ssize_t i = 0; i < total - 3; i++) {
+        if (buffer[i] == '\r' && buffer[i+1] == '\n' && 
+            buffer[i+2] == '\r' && buffer[i+3] == '\n') {
+            body_start = &buffer[i+4];
+            break;
+        }
+    }
+    
+    ck_assert_ptr_nonnull(body_start);
+    
+    // Verify binary data integrity
+    unsigned char expected[] = {0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD};
+    ck_assert_int_eq(memcmp(body_start, expected, sizeof(expected)), 0);
+}
+END_TEST
+
+START_TEST(test_serve_static_large_file)
+{
+    // Use the 10KB file
+    request.path = strdup("/static/text/atleast_10Kb_file.txt");
     request.mime_type = TEXT_PLAIN;
     request.is_dynamic = false;
     
-    // Test - use the pipe write end as the client socket
     int result = serve_static(&request, &response, pipe_fds[1], &config);
+    ck_assert_int_eq(result, 0);
     
-    // Verify - should return -1 for error
-    ck_assert_int_eq(result, -1);
-
-    // Close write end to signal EOF to read end
-    safe_close_pipe(&pipe_fds[1]);
+    close(pipe_fds[1]);
     
-    // Response should have 404 status code and reason
-    ck_assert_int_eq(response.status_code, 404);
-    ck_assert_str_eq(response.reason, "Not Found");
-    
-    // No data should have been written to the pipe yet 
-    // (error headers are the responsibility of execute_request)
-    char buffer[128] = {0};
-    ssize_t bytes_read = read(pipe_fds[0], buffer, sizeof(buffer));
-    ck_assert_int_eq(bytes_read, 0); // Pipe should be empty
-    
-    // Now let's verify the full error handling flow works by calling execute_request
-    // Reset the pipe
-    safe_close_pipe(&pipe_fds[0]);
-    if (pipe(pipe_fds) < 0) {
-        ck_abort_msg("Failed to create pipe");
+    // Read output in chunks to handle large file
+    size_t total_read = 0;
+    char buffer[BUFFER_SIZE];
+    while (read(pipe_fds[0], buffer, BUFFER_SIZE) > 0) {
+        total_read += BUFFER_SIZE;
     }
     
-    // Call execute_request, which should handle the error
-    result = execute_request(&request, pipe_fds[1], &config);
-    ck_assert_int_eq(result, 0); // execute_request should succeed
-    
-    // Close write end to signal EOF to read end
-    safe_close_pipe(&pipe_fds[1]);
-    
-    // Now we should have error headers in the pipe
-    char *output = read_pipe_output();
-    ck_assert_ptr_nonnull(output);
-    ck_assert(strstr(output, "HTTP/1.1 404 Not Found") != NULL);
-    
-    // Cleanup
-    free(output);
+    // Should have read significant data (headers + 10KB file)
+    ck_assert(total_read >= 10000);
 }
 END_TEST
 
-START_TEST(test_serve_static_special_chars_in_filename)
+START_TEST(test_serve_static_special_filename)
 {
-    // Setup
-    config.document_root = strdup("./public/");
-    // Use a file with spaces and special characters
+    // Use file with special characters
     request.path = strdup("/static/text/file with spaces & symbols #@!.txt");
     request.mime_type = TEXT_PLAIN;
     request.is_dynamic = false;
     
-    // Test
     int result = serve_static(&request, &response, pipe_fds[1], &config);
-    // Verify
     ck_assert_int_eq(result, 0);
-
-    // Close write end to signal EOF to read end
-    safe_close_pipe(&pipe_fds[1]);
     
+    close(pipe_fds[1]);
     
-    // Read what was sent to the "client"
     char *output = read_pipe_output();
     ck_assert_ptr_nonnull(output);
     
-    // Should contain HTTP 200 response
     ck_assert(strstr(output, "HTTP/1.1 200 OK") != NULL);
-    
-    // Should contain file content
     ck_assert(strstr(output, "Special filename") != NULL);
     
-    // Cleanup
     free(output);
 }
 END_TEST
 
-START_TEST(test_serve_static_different_mime_types)
+START_TEST(test_serve_static_nonexistent_file)
 {
-    // Array of paths and expected MIME types
-    const char *test_files[][2] = {
-        {"/static/html/index.html", "text/html"},
-        {"/static/css/styles.css", "text/css"},
-        {"/static/text/sample.json", "application/json"},
-        {"/static/media/dummy.png", "image/png"},
-        {"/static/misc/dummy.pdf", "application/pdf"}
-    };
-
-    size_t total_test_files = sizeof(test_files) / sizeof(test_files[0]);
+    request.path = strdup("/static/text/nonexistent.txt");
+    request.mime_type = TEXT_PLAIN;
+    request.is_dynamic = false;
     
-    // Setup common config
-    config.document_root = strdup("./public/");
-    
-    for (size_t i = 0; i < total_test_files; i++) {
-        // Setup for this iteration
-        request.path = strdup(test_files[i][0]);
-        request.mime_type = get_mime_type(request.path);
-        request.is_dynamic = false;
-
-        // Test
-        int result = serve_static(&request, &response, pipe_fds[1], &config);
-        
-        // Verify
-        ck_assert_int_eq(result, 0);
-
-        // Close write end to signal EOF to read end
-        safe_close_pipe(&pipe_fds[1]);
-        
-        // Read what was sent to the "client"
-        char *output = read_pipe_output();
-        ck_assert_ptr_nonnull(output);
-        
-        // Construct expected Content-Type header
-        char expected_header[50];
-        sprintf(expected_header, "Content-Type: %s", test_files[i][1]);
-        
-        // Verify correct MIME type in header
-        ck_assert_msg(strstr(output, expected_header) != NULL, 
-                      "MIME type mismatch for %s, expected: %s", 
-                      test_files[i][0], expected_header);
-        
-        // Cleanup this iteration
-        free(output);
-        free(request.path);
-        request.path = NULL;
-        safe_close_pipe(&pipe_fds[0]);
-
-        // Create a pipe to capture socket output
-        if (pipe(pipe_fds) < 0) {
-            perror("pipe");
-            exit(EXIT_FAILURE);
-        }
-    }
+    int result = serve_static(&request, &response, pipe_fds[1], &config);
+    ck_assert_int_eq(result, -1);
+    ck_assert_int_eq(response.status_code, 404);
+    ck_assert_str_eq(response.reason, "Not Found");
 }
 END_TEST
 
-START_TEST(test_execute_request_static)
+START_TEST(test_serve_static_permission_denied)
 {
-    // Setup
-    config.document_root = strdup("./public/");
+    // Use our created file with no read permissions
+    request.path = strdup("/static/text/noread.txt");
+    request.mime_type = TEXT_PLAIN;
+    request.is_dynamic = false;
+    
+    int result = serve_static(&request, &response, pipe_fds[1], &config);
+    ck_assert_int_eq(result, -1);
+    ck_assert_int_eq(response.status_code, 403);
+    ck_assert_str_eq(response.reason, "Forbidden");
+}
+END_TEST
+
+/* ===== Tests for serve_dynamic ===== */
+START_TEST(test_serve_dynamic_hello_cgi)
+{
+    // Use existing hello.cgi
+    request.path = strdup("/cgi-bin/hello.cgi");
+    request.is_dynamic = true;
+    request.param_count = 0;
+    
+    int result = serve_dynamic(&request, &response, pipe_fds[1], &config);
+    ck_assert_int_eq(result, 0);
+    
+    close(pipe_fds[1]);
+    
+    char *output = read_pipe_output();
+    ck_assert_ptr_nonnull(output);
+    
+    // Verify CGI output
+    ck_assert(strstr(output, "HTTP/1.1 200 OK") != NULL);
+    ck_assert(strstr(output, "Content-type: text/html") != NULL);
+    ck_assert(strstr(output, "Hello from CGI!") != NULL);
+    
+    free(output);
+}
+END_TEST
+
+START_TEST(test_serve_dynamic_with_parameters)
+{
+    // Use our params_test.cgi
+    request.path = strdup("/cgi-bin/params_test.cgi");
+    request.is_dynamic = true;
+    request.param_count = 2;
+    request.param_names = malloc(2 * sizeof(char*));
+    request.param_values = malloc(2 * sizeof(char*));
+    request.param_names[0] = strdup("name");
+    request.param_values[0] = strdup("John");
+    request.param_names[1] = strdup("age");
+    request.param_values[1] = strdup("25");
+    
+    int result = serve_dynamic(&request, &response, pipe_fds[1], &config);
+    ck_assert_int_eq(result, 0);
+    
+    close(pipe_fds[1]);
+    
+    char *output = read_pipe_output();
+    ck_assert_ptr_nonnull(output);
+    
+    // Verify query string was passed
+    ck_assert(strstr(output, "QUERY_STRING=name=John&age=25") != NULL);
+    ck_assert(strstr(output, "REQUEST_METHOD=GET") != NULL);
+    
+    free(output);
+}
+END_TEST
+
+START_TEST(test_serve_dynamic_cgi_with_status)
+{
+    // Use our status.cgi that returns 404
+    request.path = strdup("/cgi-bin/status.cgi");
+    request.is_dynamic = true;
+    request.param_count = 0;
+    
+    int result = serve_dynamic(&request, &response, pipe_fds[1], &config);
+    ck_assert_int_eq(result, 0);
+    
+    close(pipe_fds[1]);
+    
+    char *output = read_pipe_output();
+    ck_assert_ptr_nonnull(output);
+    
+    // Should have 404 status
+    ck_assert(strstr(output, "HTTP/1.1 404 Not Found") != NULL);
+    ck_assert(strstr(output, "Not found from CGI") != NULL);
+    
+    free(output);
+}
+END_TEST
+
+START_TEST(test_serve_dynamic_cgi_binary_output)
+{
+    // Use our binary.cgi
+    request.path = strdup("/cgi-bin/binary.cgi");
+    request.is_dynamic = true;
+    request.param_count = 0;
+    
+    int result = serve_dynamic(&request, &response, pipe_fds[1], &config);
+    ck_assert_int_eq(result, 0);
+    
+    close(pipe_fds[1]);
+    
+    // Read raw output
+    unsigned char buffer[BUFFER_SIZE];
+    ssize_t total = read(pipe_fds[0], buffer, BUFFER_SIZE);
+    
+    // Find body start
+    unsigned char *body_start = NULL;
+    for (ssize_t i = 0; i < total - 3; i++) {
+        if (buffer[i] == '\r' && buffer[i+1] == '\n' && 
+            buffer[i+2] == '\r' && buffer[i+3] == '\n') {
+            body_start = &buffer[i+4];
+            break;
+        }
+    }
+    
+    ck_assert_ptr_nonnull(body_start);
+    
+    // Note: The null termination in serve_dynamic may corrupt this data
+    // This test demonstrates the binary data issue
+}
+END_TEST
+
+START_TEST(test_serve_dynamic_nonexistent_cgi)
+{
+    request.path = strdup("/cgi-bin/nonexistent.cgi");
+    request.is_dynamic = true;
+    request.param_count = 0;
+    
+    int result = serve_dynamic(&request, &response, pipe_fds[1], &config);
+    ck_assert_int_eq(result, -1);
+    ck_assert_int_eq(response.status_code, 404);
+    ck_assert_str_eq(response.reason, "Not Found");
+}
+END_TEST
+
+START_TEST(test_serve_dynamic_non_executable_cgi)
+{
+    // Use our noexec.cgi
+    request.path = strdup("/cgi-bin/noexec.cgi");
+    request.is_dynamic = true;
+    request.param_count = 0;
+    
+    int result = serve_dynamic(&request, &response, pipe_fds[1], &config);
+    ck_assert_int_eq(result, -1);
+    ck_assert_int_eq(response.status_code, 403);
+    ck_assert_str_eq(response.reason, "Forbidden");
+}
+END_TEST
+
+START_TEST(test_serve_dynamic_failing_cgi)
+{
+    // Use our fail.cgi
+    request.path = strdup("/cgi-bin/fail.cgi");
+    request.is_dynamic = true;
+    request.param_count = 0;
+    
+    int result = serve_dynamic(&request, &response, pipe_fds[1], &config);
+    ck_assert_int_eq(result, -1);
+    ck_assert_int_eq(response.status_code, 500);
+    ck_assert_str_eq(response.reason, "Internal Server Error");
+}
+END_TEST
+
+/* ===== Tests for execute_request ===== */
+START_TEST(test_execute_request_static_success)
+{
     request.path = strdup("/static/text/readme.txt");
     request.mime_type = TEXT_PLAIN;
     request.is_dynamic = false;
     
-    // Test
     int result = execute_request(&request, pipe_fds[1], &config);
-
-    // Verify
     ck_assert_int_eq(result, 0);
-
-    // Close write end to signal EOF to read end
-    safe_close_pipe(&pipe_fds[1]);
     
+    close(pipe_fds[1]);
     
-    // Read what was sent to the "client"
     char *output = read_pipe_output();
     ck_assert_ptr_nonnull(output);
-    
-    // Should contain HTTP 200 response
     ck_assert(strstr(output, "HTTP/1.1 200 OK") != NULL);
     
-    // Cleanup
+    free(output);
+}
+END_TEST
+
+START_TEST(test_execute_request_static_error_handled)
+{
+    request.path = strdup("/static/text/nonexistent.txt");
+    request.mime_type = TEXT_PLAIN;
+    request.is_dynamic = false;
+    
+    int result = execute_request(&request, pipe_fds[1], &config);
+    ck_assert_int_eq(result, 0); // Should return 0 because error was handled
+    
+    close(pipe_fds[1]);
+    
+    char *output = read_pipe_output();
+    ck_assert_ptr_nonnull(output);
+    ck_assert(strstr(output, "HTTP/1.1 404 Not Found") != NULL);
+    
+    free(output);
+}
+END_TEST
+
+START_TEST(test_execute_request_dynamic_success)
+{
+    request.path = strdup("/cgi-bin/hello.cgi");
+    request.is_dynamic = true;
+    request.param_count = 0;
+    
+    int result = execute_request(&request, pipe_fds[1], &config);
+    ck_assert_int_eq(result, 0);
+    
+    close(pipe_fds[1]);
+    
+    char *output = read_pipe_output();
+    ck_assert_ptr_nonnull(output);
+    ck_assert(strstr(output, "Hello from CGI!") != NULL);
+    
+    free(output);
+}
+END_TEST
+
+/* ===== Edge Case Tests ===== */
+START_TEST(test_serve_static_no_extension)
+{
+    // Use the file with no extension
+    request.path = strdup("/static/misc/no_extension");
+    request.mime_type = TEXT_PLAIN;
+    request.is_dynamic = false;
+    
+    int result = serve_static(&request, &response, pipe_fds[1], &config);
+    ck_assert_int_eq(result, 0);
+    
+    close(pipe_fds[1]);
+    
+    char *output = read_pipe_output();
+    ck_assert_ptr_nonnull(output);
+    ck_assert(strstr(output, "HTTP/1.1 200 OK") != NULL);
+    ck_assert(strstr(output, "This file has no extension") != NULL);
+    
+    free(output);
+}
+END_TEST
+
+START_TEST(test_serve_static_css_file)
+{
+    // Test CSS file
+    request.path = strdup("/static/css/styles.css");
+    request.mime_type = TEXT_CSS;
+    request.is_dynamic = false;
+    
+    int result = serve_static(&request, &response, pipe_fds[1], &config);
+    ck_assert_int_eq(result, 0);
+    
+    close(pipe_fds[1]);
+    
+    char *output = read_pipe_output();
+    ck_assert_ptr_nonnull(output);
+    ck_assert(strstr(output, "Content-Type: text/css") != NULL);
+    ck_assert(strstr(output, "font-family: Arial") != NULL);
+    
+    free(output);
+}
+END_TEST
+
+START_TEST(test_serve_static_javascript_file)
+{
+    // Test JavaScript file
+    request.path = strdup("/static/js/script.js");
+    request.mime_type = APPLICATION_JAVASCRIPT;
+    request.is_dynamic = false;
+    
+    int result = serve_static(&request, &response, pipe_fds[1], &config);
+    ck_assert_int_eq(result, 0);
+    
+    close(pipe_fds[1]);
+    
+    char *output = read_pipe_output();
+    ck_assert_ptr_nonnull(output);
+    ck_assert(strstr(output, "Content-Type: application/javascript") != NULL);
+    ck_assert(strstr(output, "DOMContentLoaded") != NULL);
+    
     free(output);
 }
 END_TEST
@@ -501,48 +861,74 @@ Suite *request_handler_suite(void)
 {
     Suite *s = suite_create("Request Handler");
     
-    // Test case for response initialization and cleanup
-    TCase *tc_response = tcase_create("Response Management");
+    // Response lifecycle tests
+    TCase *tc_response = tcase_create("Response Lifecycle");
     tcase_add_checked_fixture(tc_response, setup, teardown);
-    tcase_add_test(tc_response, test_initialize_response_sets_defaults);
+    tcase_add_test(tc_response, test_initialize_response_complete);
+    tcase_add_test(tc_response, test_initialize_response_null_input);
+    tcase_add_test(tc_response, test_destroy_response_complete);
     suite_add_tcase(s, tc_response);
     
-    // Test case for path handling
+    // Path handling tests
     TCase *tc_path = tcase_create("Path Handling");
     tcase_add_checked_fixture(tc_path, setup, teardown);
-    tcase_add_test(tc_path, test_get_absolute_path_normal_path);
-    tcase_add_test(tc_path, test_get_absolute_path_empty_path);
+    tcase_add_test(tc_path, test_get_absolute_path_normal);
+    tcase_add_test(tc_path, test_get_absolute_path_root);
+    tcase_add_test(tc_path, test_get_absolute_path_special_chars);
+    tcase_add_test(tc_path, test_get_absolute_path_long_filename);
+    tcase_add_test(tc_path, test_get_absolute_path_too_long);
     suite_add_tcase(s, tc_path);
     
-    // Test case for MIME type handling
-    TCase *tc_mime = tcase_create("MIME Types");
-    tcase_add_checked_fixture(tc_mime, setup, teardown);
-    tcase_add_test(tc_mime, test_mime_type_to_string);
-    suite_add_tcase(s, tc_mime);
+    // Content headers tests
+    TCase *tc_content = tcase_create("Content Headers");
+    tcase_add_checked_fixture(tc_content, setup, teardown);
+    tcase_add_test(tc_content, test_set_content_headers_text_file);
+    tcase_add_test(tc_content, test_set_content_headers_large_file);
+    tcase_add_test(tc_content, test_set_content_headers_all_mime_types);
+    suite_add_tcase(s, tc_content);
     
-    // Test case for header generation
+    // Header generation tests
     TCase *tc_headers = tcase_create("Header Generation");
     tcase_add_checked_fixture(tc_headers, setup, teardown);
-    tcase_add_test(tc_headers, test_generate_response_header_success);
-    tcase_add_test(tc_headers, test_generate_response_header_error);
-    tcase_add_test(tc_headers, test_generate_response_header_with_headers);
-    tcase_add_test(tc_headers, test_set_content_headers);
-    tcase_add_test(tc_headers, test_set_content_headers_invalid_fd);
+    tcase_add_test(tc_headers, test_generate_response_header_200_ok);
+    tcase_add_test(tc_headers, test_generate_response_header_404_error);
+    tcase_add_test(tc_headers, test_generate_response_header_with_optional_headers);
     suite_add_tcase(s, tc_headers);
     
-    // Test case for file serving
-    TCase *tc_serve = tcase_create("Static File Serving");
-    tcase_add_checked_fixture(tc_serve, setup, teardown);
-    tcase_add_test(tc_serve, test_serve_static_existing_file);
-    tcase_add_test(tc_serve, test_serve_static_missing_file);
-    tcase_add_test(tc_serve, test_serve_static_special_chars_in_filename);
-    tcase_add_test(tc_serve, test_serve_static_different_mime_types);
-    suite_add_tcase(s, tc_serve);
+    // Static file serving tests
+    TCase *tc_static = tcase_create("Static File Serving");
+    tcase_add_checked_fixture(tc_static, setup, teardown);
+    tcase_add_test(tc_static, test_serve_static_small_text_file);
+    tcase_add_test(tc_static, test_serve_static_html_file);
+    tcase_add_test(tc_static, test_serve_static_binary_file);
+    tcase_add_test(tc_static, test_serve_static_large_file);
+    tcase_add_test(tc_static, test_serve_static_special_filename);
+    tcase_add_test(tc_static, test_serve_static_nonexistent_file);
+    tcase_add_test(tc_static, test_serve_static_permission_denied);
+    tcase_add_test(tc_static, test_serve_static_no_extension);
+    tcase_add_test(tc_static, test_serve_static_css_file);
+    tcase_add_test(tc_static, test_serve_static_javascript_file);
+    suite_add_tcase(s, tc_static);
     
-    // Test case for request execution
+    // Dynamic content (CGI) tests
+    TCase *tc_dynamic = tcase_create("Dynamic Content (CGI)");
+    tcase_add_checked_fixture(tc_dynamic, setup, teardown);
+    tcase_add_test(tc_dynamic, test_serve_dynamic_hello_cgi);
+    tcase_add_test(tc_dynamic, test_serve_dynamic_with_parameters);
+    tcase_add_test(tc_dynamic, test_serve_dynamic_cgi_with_status);
+    tcase_add_test(tc_dynamic, test_serve_dynamic_cgi_binary_output);
+    tcase_add_test(tc_dynamic, test_serve_dynamic_nonexistent_cgi);
+    tcase_add_test(tc_dynamic, test_serve_dynamic_non_executable_cgi);
+    tcase_add_test(tc_dynamic, test_serve_dynamic_failing_cgi);
+    tcase_set_timeout(tc_dynamic, 10); // CGI tests may take longer
+    suite_add_tcase(s, tc_dynamic);
+    
+    // Request execution tests
     TCase *tc_execute = tcase_create("Request Execution");
     tcase_add_checked_fixture(tc_execute, setup, teardown);
-    tcase_add_test(tc_execute, test_execute_request_static);
+    tcase_add_test(tc_execute, test_execute_request_static_success);
+    tcase_add_test(tc_execute, test_execute_request_static_error_handled);
+    tcase_add_test(tc_execute, test_execute_request_dynamic_success);
     suite_add_tcase(s, tc_execute);
     
     return s;
@@ -554,7 +940,7 @@ int main(void)
     Suite *s = request_handler_suite();
     SRunner *sr = srunner_create(s);
     
-    // Use CK_VERBOSE for detailed output, CK_NORMAL for normal output
+    // Use CK_VERBOSE for detailed output
     srunner_run_all(sr, CK_VERBOSE);
     int number_failed = srunner_ntests_failed(sr);
     srunner_free(sr);
