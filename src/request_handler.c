@@ -23,10 +23,10 @@ void initialize_response(http_response *response) {
     
     // Set status information to default values
     response->status_code = 200;  // Default to OK
-    response->reason = "OK";
+    response->reason = strdup("OK");  // Make dynamic
     
-    // Set standard headers to NULL - they'll be set as needed
-    response->server = "TuringBolt/0.1"; // perhaps I'll figure out a better name eventually
+    // Set standard headers - all dynamic now
+    response->server = strdup("TuringBolt/0.1");
     
     // Generate current date in HTTP format
     time_t now = time(NULL);
@@ -36,7 +36,7 @@ void initialize_response(http_response *response) {
     
     char date_buf[64];
     strftime(date_buf, sizeof(date_buf), "%a, %d %b %Y %H:%M:%S GMT", &tm_info);
-    response->date = strdup(date_buf);  // Allocate and copy date string
+    response->date = strdup(date_buf);  // Already dynamic
     
     // Initialize content-related fields
     response->content_type = NULL;
@@ -44,8 +44,8 @@ void initialize_response(http_response *response) {
     response->content_encoding = NULL;
     response->last_modified = NULL;
     
-    // Set connection management
-    response->connection = "close";  // Default to closing connection
+    // Set connection management - make dynamic
+    response->connection = strdup("close");
     
     // Initialize caching fields
     response->cache_control = NULL;
@@ -169,8 +169,8 @@ int set_content_headers(int fd, http_request *request, http_response *response, 
     // Set Content-Length based on file size
     response->content_length = (size_t) file_stat.st_size;
     
-    // Set Content-Type based on MIME type from request
-    response->content_type = mime_type_to_string(request->mime_type);
+    // Set Content-Type based on MIME type from request - make dynamic
+    response->content_type = strdup(mime_type_to_string(request->mime_type));
     
     // Set Last-Modified header
     struct tm *tm_info = gmtime(&file_stat.st_mtime);
@@ -227,15 +227,17 @@ int execute_request(http_request *request, int client_fd, server_config *config)
 
 int serve_static(http_request *request, http_response * response, int client_fd, server_config *config) {
     if (!request || !response || !config || client_fd < 0) {
-        LOG_ERROR("Invalid parameters passed to serve_static");
+        LOG_ERROR("Invalid parameters passed to serve_dynamic");
         response->status_code = 500;
-        response->reason = "Internal Server Error";
+        free(response->reason);
+        response->reason = strdup("Internal Server Error");
         return -1;
     }
     char * abs_file_path = get_absolute_path(request, config);
     if(!abs_file_path) {
         response->status_code = 414;
-        response->reason = "URI Too Long";
+        free(response->reason);
+        response->reason = strdup("URI Too Long");
         return -1;
     }
     int fd = open(abs_file_path, O_RDONLY);
@@ -244,23 +246,27 @@ int serve_static(http_request *request, http_response * response, int client_fd,
             case ENOENT:
                 // File not found
                 response->status_code = 404;
-                response->reason = "Not Found";
+                free(response->reason);
+                response->reason = strdup("Not Found");
                 break;
             case EACCES:
                 // Permission denied
                 response->status_code = 403;
-                response->reason = "Forbidden";
+                free(response->reason);
+                response->reason = strdup("Forbidden");
                 break;
             case EMFILE:
             case ENFILE:
                 // Too many open files
                 response->status_code = 503;
-                response->reason = "Service Unavailable";
+                free(response->reason);
+                response->reason = strdup("Service Unavailable");
                 break;
             default:
                 // Any other error
                 response->status_code = 500;
-                response->reason = "Internal Server Error";
+                free(response->reason);
+                response->reason = strdup("Internal Server Error");
                 LOG_ERROR("Failed to open file %s: %s", abs_file_path, strerror(errno));
                 break;
         }
@@ -271,7 +277,8 @@ int serve_static(http_request *request, http_response * response, int client_fd,
     free(abs_file_path);
 
     response->status_code = 200;
-    response->reason = "OK";
+    free(response->reason);
+    response->reason = strdup("OK");
 
     
     char * response_header = generate_response_header(response);
@@ -279,7 +286,8 @@ int serve_static(http_request *request, http_response * response, int client_fd,
     if(!response_header) {
         LOG_ERROR("Error in generating response header");
         response->status_code = 500;
-        response->reason = "Internal Server Error";
+        free(response->reason);
+        response->reason = strdup("Internal Server Error");
         close(fd);
         return -1;
     }
@@ -288,7 +296,8 @@ int serve_static(http_request *request, http_response * response, int client_fd,
 
     if(rio_unbuffered_write(client_fd, response_header, strlen(response_header)) == -1) {
         response->status_code = 500;
-        response->reason = "Internal Server Error";
+        free(response->reason);
+        response->reason = strdup("Internal Server Error");
         free(response_header);
         return -1;
     }
@@ -300,7 +309,8 @@ int serve_static(http_request *request, http_response * response, int client_fd,
         read_size = rio_unbuffered_read(fd, read_buffer, BUFFER_SIZE);
         if(read_size < 0 || rio_unbuffered_write(client_fd, read_buffer, (size_t) read_size) == -1) { // The explicit type cast is useless here but doing it to bypass the compilation flags
             response->status_code = 500; 
-            response->reason = "Internal Server Error";
+            free(response->reason);
+            response->reason = strdup("Internal Server Error");
             close(fd);
             return -1;
         }
@@ -314,7 +324,8 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
     if (!request || !response || !config || client_fd < 0) {
         LOG_ERROR("Invalid parameters passed to serve_dynamic");
         response->status_code = 500;
-        response->reason = "Internal Server Error";
+        free(response->reason);
+        response->reason = strdup("Internal Server Error");
         return -1;
     }
 
@@ -322,7 +333,8 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
     if (!abs_file_path) {
         LOG_ERROR("Failed to get absolute path for CGI script");
         response->status_code = 414;
-        response->reason = "URI Too Long";
+        free(response->reason);
+        response->reason = strdup("URI Too Long");
         return -1;
     }
 
@@ -330,7 +342,8 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
     if (access(abs_file_path, F_OK) != 0) {
         LOG_ERROR("CGI script not found: %s", abs_file_path);
         response->status_code = 404;
-        response->reason = "Not Found";
+        free(response->reason);
+        response->reason = strdup("Not Found");
         free(abs_file_path);
         return -1;
     }
@@ -338,7 +351,8 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
     if (access(abs_file_path, X_OK) != 0) {
         LOG_ERROR("CGI script not executable: %s", abs_file_path);
         response->status_code = 403;
-        response->reason = "Forbidden";
+        free(response->reason);
+        response->reason = strdup("Forbidden");
         free(abs_file_path);
         return -1;
     }
@@ -350,7 +364,8 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
     if (pipe(pipe_to_child) < 0 || pipe(pipe_from_child) < 0) {
         LOG_ERROR("Failed to create pipes for CGI communication: %s", strerror(errno));
         response->status_code = 500;
-        response->reason = "Internal Server Error";
+        free(response->reason);
+        response->reason = strdup("Internal Server Error");
         free(abs_file_path);
         return -1;
     }
@@ -361,7 +376,8 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
     if (pid < 0) {
         LOG_ERROR("Failed to fork for CGI execution: %s", strerror(errno));
         response->status_code = 500;
-        response->reason = "Internal Server Error";
+        free(response->reason);
+        response->reason = strdup("Internal Server Error");
         close(pipe_to_child[0]);
         close(pipe_to_child[1]);
         close(pipe_from_child[0]);
@@ -437,7 +453,8 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
         if (!cgi_output) {
             LOG_ERROR("Failed to allocate memory for CGI output");
             response->status_code = 500;
-            response->reason = "Internal Server Error";
+            free(response->reason);
+            response->reason = strdup("Internal Server Error");
             close(pipe_from_child[0]);
             kill(pid, SIGTERM);
             waitpid(pid, NULL, 0);
@@ -457,7 +474,8 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
                 LOG_ERROR("Failed to read from CGI output: %s", strerror(errno));
                 free(cgi_output);
                 response->status_code = 500;
-                response->reason = "Internal Server Error";
+                free(response->reason);
+                response->reason = strdup("Internal Server Error");
                 close(pipe_from_child[0]);
                 kill(pid, SIGTERM);
                 waitpid(pid, NULL, 0);
@@ -473,7 +491,8 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
                     LOG_ERROR("Failed to reallocate memory for CGI output");
                     free(cgi_output);
                     response->status_code = 500;
-                    response->reason = "Internal Server Error";
+                    free(response->reason);
+                    response->reason = strdup("Internal Server Error");
                     close(pipe_from_child[0]);
                     kill(pid, SIGTERM);
                     waitpid(pid, NULL, 0);
@@ -497,7 +516,8 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
         if(!WIFEXITED(status)) {
             LOG_ERROR("CGI script failed with status: %d", WEXITSTATUS(status));
             response->status_code = 500;
-            response->reason = "Internal Server Error";
+            free(response->reason);
+            response->reason = strdup("Internal Server Error");
             free(cgi_output);
             return -1;            
         }
@@ -505,13 +525,15 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
         if (exit_code == EXIT_QUERY_TOO_LONG) {
             LOG_ERROR("CGI script failed: Query string too long");
             response->status_code = 414;  // URI Too Long
-            response->reason = "URI Too Long";
+            free(response->reason);
+            response->reason = strdup("URI Too Long");
             free(cgi_output);
             return -1;
         } else if (exit_code != 0) {
             LOG_ERROR("CGI script failed with exit code: %d", exit_code);
             response->status_code = 500;
-            response->reason = "Internal Server Error";
+            free(response->reason);
+            response->reason = strdup("Internal Server Error");
             free(cgi_output);
             return -1;
         }
@@ -519,7 +541,8 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
         if (total_output == 0) {
             LOG_ERROR("CGI script produced no output");
             response->status_code = 500;
-            response->reason = "Internal Server Error";
+            free(response->reason);
+            response->reason = strdup("Internal Server Error");
             free(cgi_output);
             return -1;
         }
@@ -536,7 +559,8 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
         if (!header_end) {
             LOG_ERROR("CGI output missing header/body separator");
             response->status_code = 500;
-            response->reason = "Internal Server Error";
+            free(response->reason);
+            response->reason = strdup("Internal Server Error");
             free(cgi_output);
             return -1;
         }
@@ -559,7 +583,8 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
         if (!headers_section) {
             LOG_ERROR("Failed to allocate memory for headers");
             response->status_code = 500;
-            response->reason = "Internal Server Error";
+            free(response->reason);
+            response->reason = strdup("Internal Server Error");
             free(cgi_output);
             return -1;
         }
@@ -652,7 +677,6 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
         return 0;
     }
 }
-
 
 char* generate_response_header(http_response* response) {
     if (!response) {
@@ -795,8 +819,19 @@ char* generate_response_header(http_response* response) {
 }
 
 void destroy_response(http_response * response) {
+    if (!response) return;
+    
+    free(response->reason);
+    free(response->server);
     free(response->date);
+    free(response->content_type);
+    free(response->content_encoding);
     free(response->last_modified);
+    free(response->connection);
+    free(response->cache_control);
+    free(response->etag);
+    free(response->body);
+    
     for(int i = 0; i < response->extra_header_count; ++i) {
         free(response->extra_header_names[i]);
         free(response->extra_header_values[i]);

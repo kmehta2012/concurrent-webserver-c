@@ -370,8 +370,9 @@ END_TEST
 START_TEST(test_generate_response_header_200_ok)
 {
     response.status_code = 200;
-    response.reason = "OK";
-    response.content_type = "text/html";
+    free(response.reason);
+    response.reason = strdup("OK");
+    response.content_type = strdup("text/html");  // Make dynamic
     response.content_length = 1234;
     
     char *header = generate_response_header(&response);
@@ -396,8 +397,9 @@ END_TEST
 START_TEST(test_generate_response_header_404_error)
 {
     response.status_code = 404;
-    response.reason = "Not Found";
-    response.content_type = "text/html";
+    free(response.reason);
+    response.reason = strdup("Not Found");  // Make dynamic
+    response.content_type = strdup("text/html");  // Make dynamic
     response.content_length = 100;
     
     char *header = generate_response_header(&response);
@@ -408,15 +410,37 @@ START_TEST(test_generate_response_header_404_error)
 }
 END_TEST
 
+// START_TEST(test_generate_response_header_with_optional_headers)
+// {
+//     response.status_code = 200;
+//     response.reason = "OK";
+//     response.content_type = "text/html";
+//     response.content_length = 100;
+//     response.last_modified = "Wed, 21 Oct 2025 07:28:00 GMT";
+//     response.cache_control = "max-age=3600";
+//     response.etag = "\"123456789\"";
+    
+//     char *header = generate_response_header(&response);
+//     ck_assert_ptr_nonnull(header);
+    
+//     ck_assert(strstr(header, "Last-Modified: Wed, 21 Oct 2025 07:28:00 GMT\r\n") != NULL);
+//     ck_assert(strstr(header, "Cache-Control: max-age=3600\r\n") != NULL);
+//     ck_assert(strstr(header, "ETag: \"123456789\"\r\n") != NULL);
+    
+//     free(header);
+// }
+// END_TEST
+
 START_TEST(test_generate_response_header_with_optional_headers)
 {
     response.status_code = 200;
-    response.reason = "OK";
-    response.content_type = "text/html";
+    free(response.reason);
+    response.reason = strdup("OK");  // Make dynamic
+    response.content_type = strdup("text/html");  // Make dynamic
     response.content_length = 100;
-    response.last_modified = "Wed, 21 Oct 2025 07:28:00 GMT";
-    response.cache_control = "max-age=3600";
-    response.etag = "\"123456789\"";
+    response.last_modified = strdup("Wed, 21 Oct 2025 07:28:00 GMT");  // Make dynamic
+    response.cache_control = strdup("max-age=3600");  // Make dynamic
+    response.etag = strdup("\"123456789\"");  // Make dynamic
     
     char *header = generate_response_header(&response);
     ck_assert_ptr_nonnull(header);

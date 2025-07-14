@@ -32,13 +32,13 @@ typedef struct {
     
     // Standard required headers
     char *server;            // Server identification
-    char *date;              // Response generation timestamp. Will be dynamically allocated. Must be freed
+    char *date;              // Response generation timestamp. Will be dynamically allocated. MUST BE FREED
     
     // Content-related headers
     char *content_type;      // MIME type of the content
     size_t content_length;   // Length of body in bytes
     char *content_encoding;  // Optional encoding (gzip, etc.)
-    char *last_modified;     // When the resource was last changed
+    char *last_modified;     // When the resource was last changed. MUST BE FREED 
     
     // Connection management
     char *connection;        // Connection control (close, keep-alive)
