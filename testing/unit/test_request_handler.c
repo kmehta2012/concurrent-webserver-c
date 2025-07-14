@@ -1,3 +1,5 @@
+// compilation command for now - 
+// clang -std=c99 -Wall -Wextra -Werror -g -O0 -I./include -I./testing $(pkg-config --cflags check) testing/unit/test_request_handler.c src/request_handler.c src/http_parser.c src/config.c src/rio.c $(pkg-config --libs check) -pthread -lm -o executables/test_request_handler
 #include <check.h>
 #include <stdio.h>
 #include <stdlib.h>

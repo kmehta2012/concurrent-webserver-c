@@ -21,6 +21,7 @@
 **/*.hex
 **/server
 **/client
+executables/*
 
 # Debug files
 **/*.dSYM/

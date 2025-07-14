@@ -37,7 +37,8 @@ typedef enum {
     VIDEO_MP4,
     VIDEO_WEBM,
     FONT_WOFF,
-    FONT_WOFF2
+    FONT_WOFF2,
+    APPLICATION_OCTET_STREAM
 } MIME_TYPE;
 
 typedef enum {

@@ -10,6 +10,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <signal.h>
 
 
 extern char **environ;  // Declaration of the global environ variable
@@ -226,7 +227,7 @@ int execute_request(http_request *request, int client_fd, server_config *config)
 
 int serve_static(http_request *request, http_response * response, int client_fd, server_config *config) {
     if (!request || !response || !config || client_fd < 0) {
-        LOG_ERROR("Invalid parameters passed to serve_dynamic");
+        LOG_ERROR("Invalid parameters passed to serve_static");
         response->status_code = 500;
         response->reason = "Internal Server Error";
         return -1;
