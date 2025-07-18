@@ -5,6 +5,7 @@
 #include <netdb.h>
 
 #define BACKLOG 1024
+#define MAX_PORT_STRLEN 6 // 5 digits
 
 enum process_type {
     CLIENT,
