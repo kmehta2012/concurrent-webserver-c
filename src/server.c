@@ -1,3 +1,8 @@
+/*
+clang -std=c99 -Wall -Wextra -Werror -g -O0 -I./include \
+  src/server.c src/net.c src/rio.c src/http_parser.c src/request_handler.c src/config.c \
+  -pthread -lm -o executables/server
+*/
 #include "net.h"
 #include "rio.h"
 #include "http_parser.h"

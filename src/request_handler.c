@@ -618,8 +618,10 @@ int serve_dynamic(http_request *request, http_response *response, int client_fd,
         // Write standard server headers
         char server_headers[256];
         snprintf(server_headers, sizeof(server_headers), 
+                "Date: %s\r\n"              
                 "Server: %s\r\n"
                 "Connection: close\r\n",
+                response->date,              
                 config->server_name);
                 
         if (rio_unbuffered_write(client_fd, server_headers, strlen(server_headers)) == -1) {

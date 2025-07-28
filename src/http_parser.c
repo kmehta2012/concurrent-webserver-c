@@ -271,7 +271,7 @@ MIME_TYPE get_mime_type(const char *path) {
     const char *ext = strrchr(path, '.');
     
     if (!ext) {
-        return TEXT_PLAIN;  // Default to plain text if no extension
+        return APPLICATION_OCTET_STREAM;  // Default to plain text if no extension
     }
     
     ext++;  // Move past the dot
@@ -314,8 +314,10 @@ MIME_TYPE get_mime_type(const char *path) {
         return FONT_WOFF;
     } else if (strcasecmp(ext, "woff2") == 0) {
         return FONT_WOFF2;
+    } else if (strcasecmp(ext, "mov") == 0) {
+        return VIDEO_MP4;  // Browsers can often handle .mov as video/mp4
     } else {
-        return TEXT_PLAIN;  // Default to plain text for unknown types
+        return APPLICATION_OCTET_STREAM;  // Default to plain text for unknown types
     }
 }
 
